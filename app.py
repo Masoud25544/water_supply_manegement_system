@@ -281,7 +281,60 @@ def delete_customer(customer_id):
     finally:
         conn.close()
     return redirect(url_for("boss_dashboard"))
+    
+    
+@app.route("/boss/customers")
+def boss_view_customers():
+    if "boss_id" not in session:
+        flash("Tafadhali ingia kwanza", "danger")
+        return redirect(url_for("boss_login"))
 
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Pata wateja wote wa boss huyo
+    cur.execute("""
+        SELECT c.customer_id, c.full_name AS customer_name, c.phone, c.area, c.house_number,
+               c.status AS customer_status,
+               m.meter_number, m.status AS meter_status
+        FROM customers c
+        LEFT JOIN meters m ON c.customer_id = m.customer_id
+        WHERE c.boss_id = ?
+        ORDER BY c.full_name
+    """, (session["boss_id"],))
+    customers = cur.fetchall()
+    conn.close()
+    
+@app.route("/boss/meters")
+def boss_meters():
+    # Hakikisha boss ameingia
+    if "boss_id" not in session:
+        flash("Tafadhali ingia kwanza", "danger")
+        return redirect(url_for("boss_login"))
+
+    boss_id = session["boss_id"]
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Chukua wateja wote wa boss na meter zao
+    cur.execute("""
+        SELECT c.customer_id, c.full_name AS customer_name,
+               c.phone, c.area, c.house_number,
+               m.meter_id, m.meter_number, m.status AS meter_status
+        FROM customers c
+        LEFT JOIN meters m ON c.customer_id = m.customer_id
+        WHERE c.boss_id = ?
+        ORDER BY c.full_name
+    """, (boss_id,))
+
+    customers_meters = cur.fetchall()
+    conn.close()
+
+    # Weka data kwenye template ya boss_dashboard.html
+    return render_template("boss_meters.html", customers=customers_meters)    
+
+    return render_template("boss_customers.html", customers=customers)
 # ================= RUN APP ==================
 if __name__ == "__main__":
     app.run(debug=True)
