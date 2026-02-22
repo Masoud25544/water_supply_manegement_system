@@ -335,6 +335,196 @@ def boss_meters():
     return render_template("boss_meters.html", customers=customers_meters)    
 
     return render_template("boss_customers.html", customers=customers)
+    
+@app.route("/read_meter", methods=["GET", "POST"])
+def read_meter():
+    if "boss_id" not in session:
+        flash("Tafadhali ingia kwanza", "danger")
+        return redirect(url_for("boss_login"))
+
+    boss_id = session["boss_id"]
+
+    if request.method == "POST":
+        meter_number = request.form.get("meter_number")
+        current_reading = request.form.get("current_reading")
+
+        if not meter_number or not current_reading:
+            flash("Jaza taarifa zote", "danger")
+            return redirect(url_for("read_meter"))
+
+        try:
+            current_reading = float(current_reading)
+        except ValueError:
+            flash("Tafadhali weka namba sahihi kwa reading", "danger")
+            return redirect(url_for("read_meter"))
+
+        billing_month = datetime.now().strftime("%Y-%m")
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # 1️⃣ Hakikisha meter ipo na ni ya boss huyu
+        cursor.execute("""
+            SELECT meters.*, customers.boss_id 
+            FROM meters
+            JOIN customers ON meters.customer_id = customers.customer_id
+            WHERE meters.meter_number = ?
+        """, (meter_number,))
+        meter = cursor.fetchone()
+
+        if not meter:
+            flash("Tafadhari namba ya meter uliyoingiza  haipo", "danger")
+            conn.close()
+            return redirect(url_for("read_meter"))
+
+        if meter["boss_id"] != boss_id:
+            flash("Huruhusiwi kusoma meter ya boss mwingine", "danger")
+            conn.close()
+            return redirect(url_for("read_meter"))
+
+        meter_id = meter["meter_id"]
+        customer_id = meter["customer_id"]
+
+        # 2️⃣ Zuia kusoma mara mbili mwezi huu
+        cursor.execute("""
+            SELECT * FROM bills
+            WHERE meter_id = ? AND billing_month = ?
+        """, (meter_id, billing_month))
+
+        if cursor.fetchone():
+            flash("Meter tayari imesomwa mwezi huu", "warning")
+            conn.close()
+            return redirect(url_for("read_meter"))
+
+        # 3️⃣ Pata last total units zilizowahi kusomwa
+        cursor.execute("""
+            SELECT SUM(units_used) as total_units
+            FROM bills
+            WHERE meter_id = ?
+        """, (meter_id,))
+        total = cursor.fetchone()
+        previous_total_units = total["total_units"] if total["total_units"] else 0
+
+        # 4️⃣ Validate reading
+        if current_reading < previous_total_units:
+            flash("Reading mpya haiwezi kuwa chini ya ya zamani", "danger")
+            conn.close()
+            return redirect(url_for("read_meter"))
+
+        units_used = current_reading - previous_total_units
+
+        # 5️⃣ Chukua tariff ya boss
+        cursor.execute("""
+            SELECT price_per_unit 
+            FROM tariffs
+            WHERE boss_id = ?
+            ORDER BY created_at DESC LIMIT 1
+        """, (boss_id,))
+        tariff = cursor.fetchone()
+
+        if not tariff:
+            flash("Tafadhali weka tariff kwanza", "danger")
+            conn.close()
+            return redirect(url_for("read_meter"))
+
+        price_per_unit = tariff["price_per_unit"]
+        amount = units_used * price_per_unit
+
+        # 6️⃣ Tengeneza bill
+        bill_id = "BILL-" + uuid.uuid4().hex[:8]
+        cursor.execute("""
+            INSERT INTO bills (
+                bill_id, customer_id, meter_id,
+                units_used, amount, billing_month,
+                status, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            bill_id,
+            customer_id,
+            meter_id,
+            units_used,
+            amount,
+            billing_month,
+            "UNPAID",
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ))
+
+        conn.commit()
+        conn.close()
+
+        flash(f"Bill imetengenezwa kwa {meter_number}: {amount:.2f} Tsh", "success")
+        return redirect(url_for("read_meter"))
+
+    # GET request
+    return render_template("read_meter.html")
+    
+    
+@app.route("/boss/tariff", methods=["GET", "POST"])
+def boss_tariff():
+    if "boss_id" not in session:
+        flash("Tafadhali ingia kwanza", "danger")
+        return redirect(url_for("boss_login"))
+
+    boss_id = session["boss_id"]
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # POST: Hapa boss anaweka au update tariff
+    if request.method == "POST":
+        price_per_unit = request.form.get("price_per_unit")
+        if not price_per_unit:
+            flash("Tafadhali weka price per unit", "danger")
+            return redirect(url_for("boss_tariff"))
+        try:
+            price_per_unit = float(price_per_unit)
+            tariff_id = "TARIFF-" + uuid.uuid4().hex[:8]
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            cur.execute("""
+                INSERT INTO tariffs (tariff_id, boss_id, price_per_unit, created_at)
+                VALUES (?, ?, ?, ?)
+            """, (tariff_id, boss_id, price_per_unit, now))
+            conn.commit()
+            flash(f"Tariff imeundwa: {price_per_unit} Tsh/unit", "success")
+        except ValueError:
+            flash("Price per unit lazima iwe namba sahihi", "danger")
+        except sqlite3.Error as e:
+            flash(f"Kosa la database: {e}", "danger")
+        return redirect(url_for("boss_tariff"))
+
+    # GET: Onyesha latest tariff ya boss
+    cur.execute("""
+        SELECT * FROM tariffs WHERE boss_id=? ORDER BY created_at DESC LIMIT 1
+    """, (boss_id,))
+    tariff = cur.fetchone()
+    conn.close()
+    return render_template("boss_tariff.html", tariff=tariff)
+   
+@app.route("/unread_meters", methods=["GET", "POST"])
+def unread_meters():
+    if "boss_id" not in session:
+        flash("Tafadhali ingia kwanza", "danger")
+        return redirect(url_for("boss_login"))
+
+    boss_id = session["boss_id"]
+    selected_month = request.form.get("month") if request.method == "POST" else datetime.now().strftime("%Y-%m")
+
+    conn = get_db_connection()  # hakikisha unatumia get_db_connection
+    cur = conn.cursor()
+
+    query = """
+    SELECT c.customer_id, c.full_name, c.phone, c.area, c.meter_number
+    FROM customers c
+    LEFT JOIN bills b 
+           ON c.customer_id = b.customer_id AND b.billing_month = ?
+    WHERE c.boss_id = ? AND b.bill_id IS NULL
+    ORDER BY c.full_name
+    """
+    cur.execute(query, (selected_month, boss_id))
+    unread = cur.fetchall()
+    conn.close()
+
+    return render_template("unread_meters.html", unread=unread, month=selected_month)
 # ================= RUN APP ==================
 if __name__ == "__main__":
     app.run(debug=True)

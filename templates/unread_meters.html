@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Meters Hazijasomwa</title>
+    <style>
+        table {
+            border-collapse: collapse;
+            width: 100%;
+        }
+        th, td {
+            border: 1px solid #333;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #eee;
+        }
+        form {
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h2>Meters Hazijasomwa - Mwezi: {{ month }}</h2>
+
+    <form method="POST" action="{{ url_for('unread_meters') }}">
+        <label for="month">Chagua Mwezi:</label>
+        <input type="month" id="month" name="month" value="{{ month }}">
+        <button type="submit">Onyesha</button>
+    </form>
+
+    <table>
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Customer Name</th>
+                <th>Customer ID</th>
+                <th>Area</th>
+                <th>Phone</th>
+                <th>Meter Number</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% if unread %}
+                {% for customer in unread %}
+                <tr>
+                    <td>{{ loop.index }}</td> <!-- Hapa tumetumia loop.index badala ya enumerate -->
+                    <td>{{ customer.full_name or 'Hakuna' }}</td>
+                    <td>{{ customer.customer_id }}</td>
+                    <td>{{ customer.area or 'Hakuna' }}</td>
+                    <td>{{ customer.phone or 'Hakuna' }}</td>
+                    <td>{{ customer.meter_number }}</td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="6" style="text-align:center;">Hakuna meter ambazo hazijasomwa mwezi huu.</td>
+                </tr>
+            {% endif %}
+        </tbody>
+    </table>
+
+    <p><a href="{{ url_for('boss_dashboard') }}">🔙 Rudi Dashboard</a></p>
+</body>
+</html>
