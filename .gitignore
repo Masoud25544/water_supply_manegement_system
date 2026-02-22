@@ -1,0 +1,12 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Database
+*.db
+water_supply.db
+
+# IDE / environment
+.env
+*.vscode/
+*.DS_Store
