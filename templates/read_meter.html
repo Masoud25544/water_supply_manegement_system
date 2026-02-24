@@ -7,68 +7,88 @@
 
     <style>
         body {
-            font-family: Arial, sans-serif;
-            background-color: #f4f6f9;
+            font-family: 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #0d6efd, #0a58ca);
             display: flex;
             justify-content: center;
             align-items: center;
             height: 100vh;
+            margin: 0;
         }
 
         .container {
-            background: white;
-            padding: 30px;
-            width: 350px;
-            border-radius: 8px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            background: rgba(255, 255, 255, 0.95);
+            padding: 35px;
+            width: 370px;
+            border-radius: 16px;
+            box-shadow: 0 15px 40px rgba(0,0,0,0.2);
+            text-align: center;
+        }
+
+        .meter-icon {
+            width: 80px;
+            margin-bottom: 15px;
         }
 
         h2 {
-            text-align: center;
             margin-bottom: 20px;
+            color: #0d6efd;
+            font-weight: 600;
         }
 
         input {
             width: 100%;
-            padding: 10px;
+            padding: 12px;
             margin-bottom: 15px;
-            border: 1px solid #ccc;
-            border-radius: 5px;
+            border: 1px solid #d0d7e2;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: 0.3s ease;
+        }
+
+        input:focus {
+            border-color: #0d6efd;
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(13,110,253,0.15);
         }
 
         button {
             width: 100%;
-            padding: 10px;
-            background-color: #007bff;
+            padding: 12px;
+            background: linear-gradient(135deg, #0d6efd, #0a58ca);
             color: white;
             border: none;
-            border-radius: 5px;
+            border-radius: 8px;
             cursor: pointer;
+            font-size: 15px;
+            font-weight: 500;
+            transition: 0.3s ease;
         }
 
         button:hover {
-            background-color: #0056b3;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
         }
 
         .flash {
             padding: 10px;
             margin-bottom: 15px;
-            border-radius: 5px;
+            border-radius: 8px;
             font-size: 14px;
         }
 
-        .success { background-color: #d4edda; color: #155724; }
-        .danger { background-color: #f8d7da; color: #721c24; }
-        .warning { background-color: #fff3cd; color: #856404; }
+        .success { background-color: #d1e7dd; color: #0f5132; }
+        .danger { background-color: #f8d7da; color: #842029; }
+        .warning { background-color: #fff3cd; color: #664d03; }
 
         .back {
-            margin-top: 15px;
-            text-align: center;
+            margin-top: 18px;
         }
 
         .back a {
             text-decoration: none;
-            color: #007bff;
+            color: #0d6efd;
+            font-weight: 500;
         }
 
         .back a:hover {
@@ -79,6 +99,14 @@
 <body>
 
 <div class="container">
+
+    <!-- Meter SVG Icon -->
+    <svg class="meter-icon" viewBox="0 0 24 24" fill="none" stroke="#0d6efd" stroke-width="1.5">
+        <circle cx="12" cy="12" r="9"/>
+        <path d="M12 12l4-4"/>
+        <circle cx="12" cy="12" r="2" fill="#0d6efd"/>
+    </svg>
+
     <h2>Soma Meter</h2>
 
     <!-- Flash Messages -->

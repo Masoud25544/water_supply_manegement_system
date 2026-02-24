@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="sw">
+<head>
+<meta charset="UTF-8">
+<title>Pokea Malipo</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+
+<body class="bg-light">
+
+<div class="container mt-5">
+    <div class="card shadow-lg p-4">
+        <h3 class="mb-4 text-primary">Pokea Malipo ya Bill</h3>
+
+        <p><strong>Jina:</strong> {{ bill.customer_id }}</p>
+        <p><strong>Kiasi cha Bill:</strong> {{ bill.amount }} TZS</p>
+        <p><strong>Status:</strong> {{ bill.status }}</p>
+
+        <form method="POST">
+            <div class="mb-3">
+                <label>Kiasi Kilicholipwa</label>
+                <input type="number" step="0.01" name="amount_paid" class="form-control" required>
+            </div>
+
+            <div class="mb-3">
+                <label>Njia ya Malipo</label>
+                <select name="payment_method" class="form-control" required>
+                    <option value="Cash">Cash</option>
+                    <option value="M-Pesa">M-Pesa</option>
+                    <option value="Tigo Pesa">Tigo Pesa</option>
+                    <option value="Airtel Money">Airtel Money</option>
+                    <option value="Bank">Bank</option>
+                </select>
+            </div>
+
+            <div class="mb-3">
+                <label>Reference (optional)</label>
+                <input type="text" name="reference" class="form-control">
+            </div>
+
+            <button type="submit" class="btn btn-success w-100">Thibitisha Malipo</button>
+        </form>
+    </div>
+</div>
+
+</body>
+</html>

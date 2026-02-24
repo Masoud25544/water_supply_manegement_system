@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Super Admin - Wateja wa Boss</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <h1>Super Admin Dashboard</h1>
+
+    <p><a href="{{ url_for('superadmin_dashboard') }}">⏪ Rudisha Dashboard</a></p>
+
+    <!-- Chagua boss -->
+    <form method="POST" action="{{ url_for('superadmin_boss_customers') }}">
+        <label for="boss_id">Chagua Boss:</label>
+        <select name="boss_id" id="boss_id" required>
+            <option value="">-- Chagua Boss --</option>
+            {% for boss in bosses %}
+                <option value="{{ boss.boss_id }}" {% if boss.boss_id == selected_boss_id %}selected{% endif %}>
+                    {{ boss.full_name }} ({{ boss.username }})
+                </option>
+            {% endfor %}
+        </select>
+        <button type="submit">Onyesha Wateja</button>
+    </form>
+
+    <hr>
+
+    <!-- Wateja wa boss waliochaguliwa -->
+    {% if selected_boss_id %}
+        <h3>Wateja wa boss uliyechagua:</h3>
+        {% if customers %}
+            <table border="1" cellpadding="5" cellspacing="0">
+                <thead>
+                    <tr>
+                        <th>Jina Kamili</th>
+                        <th>Phone</th>
+                        <th>Area</th>
+                        <th>House Number</th>
+                        <th>Meter Number</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for customer in customers %}
+                    <tr>
+                        <td>{{ customer.full_name }}</td>
+                        <td>{{ customer.phone }}</td>
+                        <td>{{ customer.area }}</td>
+                        <td>{{ customer.house_number }}</td>
+                        <td>{{ customer.meter_number }}</td>
+                        <td>{{ customer.status }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p>Hakuna wateja wa boss huyu.</p>
+        {% endif %}
+    {% else %}
+        <p>Chagua boss kwanza ili kuona wateja wake.</p>
+    {% endif %}
+</body>
+</html>
