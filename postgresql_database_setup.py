@@ -1,9 +1,14 @@
 import psycopg2
 from werkzeug.security import generate_password_hash
 
-
 def setup_database():
+    """
+    ✅ Professional PostgreSQL database setup for Water Supply Management System
+    Includes: super_admin, boss, staff, customers, meters, tariffs, bills, payments, receipts,
+              master_meter, master_meter_readings
+    """
 
+    # ================= CONNECT TO POSTGRESQL =================
     conn = psycopg2.connect(
         dbname="water_supply_db",
         user="your_db_user",
@@ -11,15 +16,14 @@ def setup_database():
         host="localhost",
         port="5432"
     )
-
     conn.autocommit = False
     cursor = conn.cursor()
 
     try:
         # ================= ENABLE UUID EXTENSION =================
-        cursor.execute('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";')
+        cursor.execute('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";')  # for generating UUIDs
 
-        # ================= SUPER ADMIN =================
+        # ================= SUPER ADMIN TABLE =================
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS super_admin (
             admin_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -29,6 +33,7 @@ def setup_database():
         )
         """)
 
+        # Insert default admin if not exists
         cursor.execute("""
         INSERT INTO super_admin (username, password)
         VALUES (%s, %s)
@@ -38,7 +43,7 @@ def setup_database():
             generate_password_hash("1234")
         ))
 
-        # ================= BOSS =================
+        # ================= BOSS TABLE =================
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS boss (
             boss_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -52,7 +57,7 @@ def setup_database():
         )
         """)
 
-        # ================= STAFF =================
+        # ================= STAFF TABLE =================
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS staff (
             staff_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -67,7 +72,7 @@ def setup_database():
         )
         """)
 
-        # ================= CUSTOMERS =================
+        # ================= CUSTOMERS TABLE =================
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS customers (
             customer_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -84,7 +89,7 @@ def setup_database():
         )
         """)
 
-        # ================= METERS =================
+        # ================= METERS TABLE =================
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS meters (
             meter_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -96,7 +101,7 @@ def setup_database():
         )
         """)
 
-        # ================= TARIFFS =================
+        # ================= TARIFFS TABLE =================
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS tariffs (
             tariff_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -107,7 +112,7 @@ def setup_database():
         )
         """)
 
-        # ================= BILLS =================
+        # ================= BILLS TABLE =================
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS bills (
             bill_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -125,7 +130,7 @@ def setup_database():
         )
         """)
 
-        # ================= PAYMENTS =================
+        # ================= PAYMENTS TABLE =================
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS payments (
             payment_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -143,7 +148,7 @@ def setup_database():
         )
         """)
 
-        # ================= RECEIPTS =================
+        # ================= RECEIPTS TABLE =================
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS receipts (
             receipt_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -161,7 +166,7 @@ def setup_database():
         )
         """)
 
-        # ================= MASTER METER =================
+        # ================= MASTER METER TABLE =================
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS master_meter (
             master_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
