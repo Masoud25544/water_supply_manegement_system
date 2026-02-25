@@ -229,45 +229,90 @@ def boss_logout():
     flash("Umetoka kwenye dashboard ya boss", "success")
     return redirect(url_for("boss_login"))
 
+
 # ================= CUSTOMER MANAGEMENT ==================
 @app.route("/boss/add_customer", methods=["GET", "POST"])
 def add_customer():
     if "boss_id" not in session:
         flash("Tafadhali ingia kwanza", "danger")
         return redirect(url_for("boss_login"))
+
     if request.method == "POST":
         full_name = request.form.get("full_name")
         phone = request.form.get("phone")
         area = request.form.get("area")
         house_number = request.form.get("house_number")
         meter_number = request.form.get("meter_number")
+
+        # ✅ Validation
         if not full_name or not meter_number:
             flash("Jina kamili na meter number ni lazima!", "danger")
             return redirect(url_for("add_customer"))
-        customer_id = "CUST-" + str(uuid.uuid4())[:8]
-        meter_id = "MTR-" + str(uuid.uuid4())[:8]
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        status = "ACTIVE"
+
         conn = get_db_connection()
         cur = conn.cursor()
+
         try:
+            # ✅ Check kama meter ipo tayari
+            cur.execute("SELECT 1 FROM meters WHERE meter_number = ?", (meter_number,))
+            if cur.fetchone():
+                flash("⚠️ Tafadhari meter namba uliyo ingiza  tayari imesajiliwa kwenyevmfumo.", "warning")
+                conn.close()
+                return redirect(url_for("add_customer"))
+
+            customer_id = "CUST-" + str(uuid.uuid4())[:8]
+            meter_id = "MTR-" + str(uuid.uuid4())[:8]
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            status = "ACTIVE"
+
+            # ✅ Insert customer
             cur.execute("""
-                INSERT INTO customers (customer_id, boss_id, full_name, phone, area, house_number, meter_number, status, created_at, signup_date)
+                INSERT INTO customers 
+                (customer_id, boss_id, full_name, phone, area, house_number, meter_number, status, created_at, signup_date)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (customer_id, session["boss_id"], full_name, phone, area, house_number, meter_number, status, now, now))
+            """, (
+                customer_id,
+                session["boss_id"],
+                full_name,
+                phone,
+                area,
+                house_number,
+                meter_number,
+                status,
+                now,
+                now
+            ))
+
+            # ✅ Insert meter
             cur.execute("""
-                INSERT INTO meters (meter_id, meter_number, customer_id, status)
+                INSERT INTO meters 
+                (meter_id, meter_number, customer_id, status)
                 VALUES (?, ?, ?, ?)
-            """, (meter_id, meter_number, customer_id, status))
+            """, (
+                meter_id,
+                meter_number,
+                customer_id,
+                status
+            ))
+
             conn.commit()
-            flash(f"Mteja {full_name} na meter yake {meter_number} wamesajiliwa!", "success")
-        except sqlite3.Error as e:
-            flash(f"Kosa la database: {e}", "danger")
+            flash(f"✅ Mteja {full_name} na meter {meter_number} wamesajiliwa kikamilifu!", "success")
+
+        except sqlite3.IntegrityError:
+            conn.rollback()
+            flash("⚠️ Meter tayari ipo kwenye mfumo.", "warning")
+
+        except Exception:
+            conn.rollback()
+            flash("❌ Kuna tatizo limetokea. Tafadhali jaribu tena.", "danger")
+
         finally:
             conn.close()
-        return redirect(url_for("boss_dashboard"))
-    return render_template("add_customer.html")
 
+        return redirect(url_for("boss_dashboard"))
+
+    return render_template("add_customer.html")
+    
 @app.route("/boss/edit_customer/<customer_id>", methods=["GET", "POST"])
 def edit_customer(customer_id):
     if "boss_id" not in session:
@@ -758,11 +803,15 @@ def toggle_customer(customer_id):
 # ================= RECEIVE PAYMENT =====================
 @app.route("/receive_payment/<bill_id>", methods=["GET", "POST"])
 def receive_payment(bill_id):
+
+    if "boss_id" not in session:
+        flash("Tafadhali ingia kwanza", "danger")
+        return redirect(url_for("boss_login"))
+
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    # Chukua bill pamoja na meter_number kutoka customers/meter
     bill = cursor.execute("""
         SELECT b.*, c.full_name AS customer_name, c.customer_id,
                m.meter_number
@@ -778,15 +827,99 @@ def receive_payment(bill_id):
         return redirect(url_for("unpaid_bills"))
 
     if request.method == "POST":
-        # Thibitisha malipo
-        cursor.execute("UPDATE bills SET status='PAID' WHERE bill_id=?", (bill_id,))
-        conn.commit()
-        conn.close()
-        flash(f"Bili ya {bill['customer_name']} ({bill['bill_id']}) imelipwa kiasi {bill['amount']}", "success")
-        return redirect(url_for("unpaid_bills"))
+        try:
+            payment_id = "PAY-" + uuid.uuid4().hex[:8]
+            receipt_id = "RCPID-" + uuid.uuid4().hex[:8]
+            boss_id = session["boss_id"]
+
+            # Generate receipt number
+            year = datetime.now().year
+            count = cursor.execute("SELECT COUNT(*) FROM receipts").fetchone()[0] + 1
+            receipt_number = f"RCP-{year}-{str(count).zfill(5)}"
+
+            # 1️⃣ Insert payment
+            cursor.execute("""
+                INSERT INTO payments
+                (payment_id, bill_id, customer_id, boss_id, amount_paid, payment_method, reference, paid_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                payment_id,
+                bill["bill_id"],
+                bill["customer_id"],
+                boss_id,
+                bill["amount"],
+                "CASH",
+                None,
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            ))
+
+            # 2️⃣ Update bill
+            cursor.execute("""
+                UPDATE bills
+                SET status='PAID',
+                    payment_method='CASH',
+                    payment_date=?
+                WHERE bill_id=?
+            """, (
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                bill_id
+            ))
+
+            # 3️⃣ Insert receipt
+            cursor.execute("""
+                INSERT INTO receipts
+                (receipt_id, payment_id, receipt_number, customer_id, boss_id, amount, issued_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                receipt_id,
+                payment_id,
+                receipt_number,
+                bill["customer_id"],
+                boss_id,
+                bill["amount"],
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            ))
+
+            conn.commit()
+            conn.close()
+
+            flash("Malipo yamepokelewa na risiti imetengenezwa!", "success")
+            return redirect(url_for("view_receipt", receipt_id=receipt_id))
+
+        except Exception as e:
+            conn.rollback()
+            conn.close()
+            flash("Kuna tatizo wakati wa kuhifadhi malipo", "danger")
+            return redirect(url_for("unpaid_bills"))
 
     conn.close()
     return render_template("confirm_payment.html", bill=bill)
+    
+@app.route("/receipt/<receipt_id>")
+def view_receipt(receipt_id):
+
+    if "boss_id" not in session:
+        return redirect(url_for("boss_login"))
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    receipt = cursor.execute("""
+        SELECT r.*, c.full_name, c.phone
+        FROM receipts r
+        JOIN customers c ON r.customer_id = c.customer_id
+        WHERE r.receipt_id=?
+    """, (receipt_id,)).fetchone()
+
+    conn.close()
+
+    if not receipt:
+        flash("Risiti haipo", "danger")
+        return redirect(url_for("boss_dashboard"))
+
+    return render_template("receipt.html", receipt=receipt)    
+    
 # ================= RUN APP ==================
 if __name__ == "__main__":
     app.run(debug=True)
