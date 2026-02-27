@@ -10,20 +10,17 @@
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
 
 <style>
-/* Body Dark Gradient Background */
 body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     margin: 0;
     min-height: 100vh;
-    background: linear-gradient(135deg, #0f2027, #203a43, #2c5364); /* dark gradient */
+    background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
     color: #f5f5f5;
     padding: 20px;
     display: flex;
     flex-direction: column;
     align-items: center;
 }
-
-/* Page Heading */
 h2 {
     margin-bottom: 20px;
     font-weight: 700;
@@ -33,8 +30,6 @@ h2 {
     font-size: 28px;
     text-align: center;
 }
-
-/* Form Container */
 .form-container {
     margin-bottom: 25px;
     width: 100%;
@@ -42,7 +37,6 @@ h2 {
     display: flex;
     justify-content: center;
 }
-
 input[type="month"] {
     padding: 8px 10px;
     border-radius: 8px;
@@ -58,8 +52,6 @@ input[type="month"]:focus {
     box-shadow: 0 0 8px rgba(255,126,95,0.3);
     outline: none;
 }
-
-/* Submit Button */
 button {
     padding: 8px 15px;
     cursor: pointer;
@@ -74,8 +66,6 @@ button:hover {
     transform: translateY(-2px);
     box-shadow: 0 5px 15px rgba(255,126,95,0.4);
 }
-
-/* Message Boxes */
 .message {
     padding: 12px 15px;
     border-radius: 10px;
@@ -85,98 +75,39 @@ button:hover {
     text-align: center;
     font-weight: 500;
 }
-.warning {
-    background-color: #772222;
-    color: #ffb3b3;
-    box-shadow: 0 4px 12px rgba(204,0,0,0.3);
-}
-.success {
-    background-color: #223344;
-    color: #a3d8ff;
-    box-shadow: 0 4px 12px rgba(0,85,128,0.3);
-}
-
-/* Count Box */
-.count-box {
-    font-weight: bold;
-    font-size: 18px;
-    margin-bottom: 20px;
-    color: #f0a500;
-}
-
-/* Cards Grid */
-.cards-container {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: 20px;
-    width: 100%;
-    max-width: 1000px;
-}
-
-.card {
-    border-radius: 12px;
-    padding: 20px;
-    background: linear-gradient(135deg, #444444, #222831); /* dark gradient */
-    box-shadow: 0 8px 20px rgba(0,0,0,0.4);
-    transition: transform 0.3s, box-shadow 0.3s;
-}
-.card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 12px 30px rgba(0,0,0,0.6);
-}
-
-.card h3 {
-    margin-top: 0;
-    margin-bottom: 10px;
-    font-size: 18px;
-    color: #ffdd59;
-    font-weight: 700;
-}
-.card p {
-    margin: 4px 0;
-    font-size: 14px;
-    color: #f5f5f5;
-}
-.badge-status {
-    font-size: 12px;
-    font-weight: 600;
-    padding: 3px 7px;
-    border-radius: 8px;
-    color: white;
-}
-.badge-active {
-    background-color: #28a745;
-}
-.badge-inactive {
-    background-color: #6c757d;
-}
-
-/* Back Link */
-.back-link {
-    margin-top: 25px;
+.warning { background-color: #772222; color: #ffb3b3; box-shadow: 0 4px 12px rgba(204,0,0,0.3); }
+.success { background-color: #223344; color: #a3d8ff; box-shadow: 0 4px 12px rgba(0,85,128,0.3); }
+.count-box { font-weight: bold; font-size: 18px; margin-bottom: 20px; color: #f0a500; }
+.cards-container { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 20px; width: 100%; max-width: 1000px; }
+.card { border-radius: 12px; padding: 20px; background: linear-gradient(135deg, #444444, #222831); box-shadow: 0 8px 20px rgba(0,0,0,0.4); transition: transform 0.3s, box-shadow 0.3s; }
+.card:hover { transform: translateY(-5px); box-shadow: 0 12px 30px rgba(0,0,0,0.6); }
+.card h3 { margin-top: 0; margin-bottom: 10px; font-size: 18px; color: #ffdd59; font-weight: 700; }
+.card p { margin: 4px 0; font-size: 14px; color: #f5f5f5; }
+.badge-status { font-size: 12px; font-weight: 600; padding: 3px 7px; border-radius: 8px; color: white; }
+.badge-active { background-color: #28a745; }
+.badge-inactive { background-color: #6c757d; }
+.action-btn {
     display: inline-block;
+    margin-top: 10px;
+    padding: 6px 12px;
+    font-size: 14px;
     font-weight: 600;
+    color: white;
+    background-color: #0d6efd;
+    border-radius: 8px;
     text-decoration: none;
-    color: #ff7e5f;
-    font-size: 16px;
-    transition: color 0.3s;
+    transition: transform 0.2s, box-shadow 0.2s;
 }
-.back-link:hover {
-    color: #feb47b;
+.action-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 12px rgba(0,0,0,0.4);
 }
-
-/* Responsive */
+.back-link { margin-top: 25px; display: inline-block; font-weight: 600; text-decoration: none; color: #ff7e5f; font-size: 16px; transition: color 0.3s; }
+.back-link:hover { color: #feb47b; }
 @media (max-width: 600px) {
-    .cards-container {
-        grid-template-columns: 1fr;
-    }
-    .form-container {
-        flex-direction: column;
-        gap: 10px;
-    }
-    input[type="month"] {
-        margin-right: 0;
-    }
+    .cards-container { grid-template-columns: 1fr; }
+    .form-container { flex-direction: column; gap: 10px; }
+    input[type="month"] { margin-right: 0; }
 }
 </style>
 </head>
@@ -191,17 +122,12 @@ button:hover {
     </form>
 </div>
 
-<!-- MESSAGE HANDLING -->
 {% if message %}
-    <div class="message warning">
-        {{ message }}
-    </div>
+    <div class="message warning">{{ message }}</div>
 {% endif %}
 
 {% if unread and not message %}
-    <div class="count-box">
-        Jumla ya meters hazijasomwa: {{ unread_count }}
-    </div>
+    <div class="count-box">Jumla ya meters hazijasomwa: {{ unread_count }}</div>
 
     <div class="cards-container">
         {% for customer in unread %}
@@ -219,17 +145,24 @@ button:hover {
                     <span class="badge-status badge-inactive">INACTIVE</span>
                 {% endif %}
             </p>
+
+            <!-- Role-aware action button -->
+            {% if 'boss_id' in session or 'staff_id' in session %}
+                <a href="{{ url_for('read_meter') }}?meter_number={{ customer.meter_number }}" class="action-btn">
+                    📏 Soma Meter
+                </a>
+            {% endif %}
         </div>
         {% endfor %}
     </div>
 
 {% elif not unread and not message %}
-    <div class="message success">
-        ✔ Meters zote zimesomwa mwezi huu.
-    </div>
+    <div class="message success">✔ Meters zote zimesomwa mwezi huu.</div>
 {% endif %}
 
-<a class="back-link" href="{{ url_for('boss_dashboard') }}">🔙 Rudi Dashboard</a>
+<a class="back-link" href="{% if 'staff_id' in session %}{{ url_for('staff_dashboard') }}{% else %}{{ url_for('boss_dashboard') }}{% endif %}">
+    🔙 Rudi Dashboard
+</a>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Collector Dashboard</title>
+</head>
+<body>
+    <h1>Karibu {{ session.staff_name }}!</h1>
+    <h3>Total Collected: {{ total_collected }} TZS</h3>
+
+    <h2>Unpaid Bills</h2>
+    {% if unpaid_bills %}
+    <table border="1" cellpadding="5" cellspacing="0">
+        <thead>
+            <tr>
+                <th>Bill ID</th>
+                <th>Customer</th>
+                <th>Units Used</th>
+                <th>Amount</th>
+                <th>Billing Month</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for bill in unpaid_bills %}
+            <tr>
+                <td>{{ bill.bill_id }}</td>
+                <td>{{ bill.customer_name }}</td>
+                <td>{{ bill.units_used }}</td>
+                <td>{{ bill.amount }}</td>
+                <td>{{ bill.billing_month }}</td>
+                <td>
+                    <a href="{{ url_for('collect_payment', bill_id=bill.bill_id) }}">Receive Payment</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>Hakuna bills zisizolipwa.</p>
+    {% endif %}
+</body>
+</html>

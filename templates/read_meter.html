@@ -1,106 +1,34 @@
 <!DOCTYPE html>
 <html lang="sw">
 <head>
-    <meta charset="UTF-8">
-    <title>Soma Meter</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-    <style>
-        body {
-            font-family: 'Segoe UI', sans-serif;
-            background: linear-gradient(135deg, #0d6efd, #0a58ca);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            margin: 0;
-        }
-
-        .container {
-            background: rgba(255, 255, 255, 0.95);
-            padding: 35px;
-            width: 370px;
-            border-radius: 16px;
-            box-shadow: 0 15px 40px rgba(0,0,0,0.2);
-            text-align: center;
-        }
-
-        .meter-icon {
-            width: 80px;
-            margin-bottom: 15px;
-        }
-
-        h2 {
-            margin-bottom: 20px;
-            color: #0d6efd;
-            font-weight: 600;
-        }
-
-        input {
-            width: 100%;
-            padding: 12px;
-            margin-bottom: 15px;
-            border: 1px solid #d0d7e2;
-            border-radius: 8px;
-            font-size: 14px;
-            transition: 0.3s ease;
-        }
-
-        input:focus {
-            border-color: #0d6efd;
-            outline: none;
-            box-shadow: 0 0 0 3px rgba(13,110,253,0.15);
-        }
-
-        button {
-            width: 100%;
-            padding: 12px;
-            background: linear-gradient(135deg, #0d6efd, #0a58ca);
-            color: white;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 15px;
-            font-weight: 500;
-            transition: 0.3s ease;
-        }
-
-        button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
-        }
-
-        .flash {
-            padding: 10px;
-            margin-bottom: 15px;
-            border-radius: 8px;
-            font-size: 14px;
-        }
-
-        .success { background-color: #d1e7dd; color: #0f5132; }
-        .danger { background-color: #f8d7da; color: #842029; }
-        .warning { background-color: #fff3cd; color: #664d03; }
-
-        .back {
-            margin-top: 18px;
-        }
-
-        .back a {
-            text-decoration: none;
-            color: #0d6efd;
-            font-weight: 500;
-        }
-
-        .back a:hover {
-            text-decoration: underline;
-        }
-    </style>
+<meta charset="UTF-8">
+<title>Soma Meter</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+body { font-family: 'Segoe UI', sans-serif; background: linear-gradient(135deg, #0d6efd, #0a58ca); display:flex; justify-content:center; align-items:center; height:100vh; margin:0; }
+.container { background: rgba(255,255,255,0.95); padding:35px; width:370px; border-radius:16px; box-shadow:0 15px 40px rgba(0,0,0,0.2); text-align:center; }
+.meter-icon { width:80px; margin-bottom:15px; }
+h2 { margin-bottom:20px; color:#0d6efd; font-weight:600; }
+input { width:100%; padding:12px; margin-bottom:15px; border:1px solid #d0d7e2; border-radius:8px; font-size:14px; transition:0.3s ease; }
+input:focus { border-color:#0d6efd; outline:none; box-shadow:0 0 0 3px rgba(13,110,253,0.15); }
+button { width:100%; padding:12px; background:linear-gradient(135deg,#0d6efd,#0a58ca); color:white; border:none; border-radius:8px; cursor:pointer; font-size:15px; font-weight:500; transition:0.3s ease; }
+button:hover { transform:translateY(-2px); box-shadow:0 5px 15px rgba(0,0,0,0.2); }
+.flash { padding:10px; margin-bottom:15px; border-radius:8px; font-size:14px; }
+.success { background-color:#d1e7dd; color:#0f5132; }
+.danger { background-color:#f8d7da; color:#842029; }
+.warning { background-color:#fff3cd; color:#856404; }
+.back { margin-top:18px; }
+.back a { text-decoration:none; color:#0d6efd; font-weight:500; }
+.back a:hover { text-decoration:underline; }
+.bill-card { margin-top:25px; padding:20px; border-radius:12px; background-color:#f8f9fa; box-shadow:0 4px 12px rgba(0,0,0,0.1); text-align:left; }
+.bill-card h3 { color:#0d6efd; margin-bottom:15px; }
+.bill-row { margin-bottom:8px; font-size:15px; }
+</style>
 </head>
 <body>
 
 <div class="container">
 
-    <!-- Meter SVG Icon -->
     <svg class="meter-icon" viewBox="0 0 24 24" fill="none" stroke="#0d6efd" stroke-width="1.5">
         <circle cx="12" cy="12" r="9"/>
         <path d="M12 12l4-4"/>
@@ -109,13 +37,10 @@
 
     <h2>Soma Meter</h2>
 
-    <!-- Flash Messages -->
     {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
             {% for category, message in messages %}
-                <div class="flash {{ category }}">
-                    {{ message }}
-                </div>
+                <div class="flash {{ category }}">{{ message }}</div>
             {% endfor %}
         {% endif %}
     {% endwith %}
@@ -126,10 +51,26 @@
         <button type="submit">Soma Meter</button>
     </form>
 
-    <div class="back">
-        <a href="{{ url_for('boss_dashboard') }}">🔙 Rudi Dashboard</a>
+    {% if bill %}
+    <div class="bill-card">
+        <h3>Bill ya Mita</h3>
+        <div class="bill-row"><strong>Customer:</strong> {{ bill.customer_name }}</div>
+        <div class="bill-row"><strong>Bill ID:</strong> {{ bill.bill_id }}</div>
+        <div class="bill-row"><strong>Tarehe ya Kusoma Mita:</strong> {{ bill.meter_date }}</div>
+        <div class="bill-row"><strong>Units:</strong> {{ bill.units }}</div>
+        <div class="bill-row"><strong>Kiasi cha kulipa:</strong> Tsh {{ "{:,.2f}".format(bill.amount) }}</div>
     </div>
-</div>
+    {% endif %}
 
+    <!-- ✅ RUDI DASHBOARD BUTTON KWA ROLE SAHIHI -->
+    <div class="back">
+        {% if 'staff_id' in session %}
+            <a href="{{ url_for('staff_dashboard') }}">🔙 Rudi Dashboard</a>
+        {% elif 'boss_id' in session %}
+            <a href="{{ url_for('boss_dashboard') }}">🔙 Rudi Dashboard</a>
+        {% endif %}
+    </div>
+
+</div>
 </body>
 </html>

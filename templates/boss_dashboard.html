@@ -153,17 +153,30 @@
             <a href="{{ url_for('add_customer') }}" class="btn btn-success">
                 <i class="bi bi-person-plus-fill"></i> Sajiri Mteja
             </a>
+
             <a href="{{ url_for('boss_tariff') }}" class="btn btn-warning">
                 <i class="bi bi-cash-stack"></i> Weka Bei
             </a>
+
             <a href="{{ url_for('unread_meters') }}" class="btn btn-dark">
                 <i class="bi bi-exclamation-triangle-fill"></i> Meters Hazijasomwa
             </a>
+
             <a href="{{ url_for('unpaid_bills') }}" class="btn btn-danger">
                 <i class="bi bi-exclamation-circle-fill"></i> Bili Zisizolipwa
             </a>
+
             <a href="{{ url_for('boss_view_customers') }}" class="btn btn-primary">
                 <i class="bi bi-people-fill"></i> Manage Customers
+            </a>
+
+            <!-- STAFF MANAGEMENT -->
+            <a href="{{ url_for('add_staff') }}" class="btn btn-info">
+                <i class="bi bi-person-plus"></i> Sajili Staff
+            </a>
+
+            <a href="{{ url_for('view_staff') }}" class="btn btn-secondary">
+                <i class="bi bi-people"></i> Manage Staff
             </a>
         </div>
 
@@ -182,7 +195,7 @@
             </form>
         </div>
 
-        <!-- CUSTOMERS TABLE WITH PAYMENT BUTTON -->
+        <!-- CUSTOMERS TABLE -->
         <div class="table-responsive">
         <table class="table table-striped table-bordered align-middle w-100">
             <thead class="table-dark text-center">
@@ -222,7 +235,6 @@
                             <a href="{{ url_for('delete_customer', customer_id=m.customer_id) }}"
                                class="btn btn-sm btn-danger mb-1">Delete</a>
 
-                            <!-- PAYMENT BUTTON -->
                             {% for bill in unpaid_bills %}
                                 {% if bill.customer_id == m.customer_id %}
                                     <a href="{{ url_for('receive_payment', bill_id=bill.bill_id) }}"
@@ -231,7 +243,6 @@
                                     </a>
                                 {% endif %}
                             {% endfor %}
-
                         {% else %}
                             <span class="text-muted">Hakuna kitendo</span>
                         {% endif %}
