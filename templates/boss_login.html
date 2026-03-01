@@ -9,11 +9,10 @@
     <!-- Bootstrap CSS -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
 
-    <!-- Custom Styles -->
     <style>
         body {
             height: 100vh;
-            background: linear-gradient(to right, #1e3c72, #2a5298); /* gradient blue */
+            background: linear-gradient(to right, #1e3c72, #2a5298);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -26,7 +25,7 @@
             padding: 40px;
             width: 100%;
             max-width: 420px;
-            box-shadow: 0 8px 20px rgba(0,0,0,0.25);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.25);
             transition: transform 0.3s ease;
         }
 
@@ -46,21 +45,42 @@
             box-shadow: 0 0 0 0.2rem rgba(42, 82, 152, 0.25);
         }
 
+        /* ===== BUTTON PROFESSIONAL ===== */
         .btn-primary {
-            background-color: #1e3c72;
+            background: #1e3c72;
             border: none;
-            transition: background-color 0.3s ease;
+            border-radius: 12px;
+            font-weight: 600;
+            letter-spacing: 1px;
+            padding: 12px;
+            box-shadow: 0 6px 0 #162d57;
+            transition: all 0.15s ease-in-out;
         }
 
         .btn-primary:hover {
-            background-color: #162d57;
+            background: #254a8a;
+        }
+
+        /* IKIBONYEZWA */
+        .btn-primary:active {
+            background: #0d6efd;
+            transform: translateY(6px);
+            box-shadow: 0 0 0 #162d57;
+        }
+
+        /* IKISUBMIT */
+        .btn-primary.loading {
+            background: #198754 !important;
+            box-shadow: 0 4px 0 #145c32;
         }
 
         .btn-secondary {
             background-color: #f0f0f0;
             color: #1e3c72;
             border: none;
-            transition: background-color 0.3s ease, color 0.3s ease;
+            border-radius: 12px;
+            padding: 12px;
+            transition: all 0.3s ease;
         }
 
         .btn-secondary:hover {
@@ -71,9 +91,15 @@
         .alert {
             border-radius: 10px;
         }
+
+        .spinner-border {
+            width: 1rem;
+            height: 1rem;
+        }
     </style>
 </head>
 <body>
+
 <div class="login-card">
 
     <h2>Boss Login</h2>
@@ -84,28 +110,50 @@
         {% for category, message in messages %}
           <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
             {{ message }}
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
           </div>
         {% endfor %}
       {% endif %}
     {% endwith %}
 
-    <form method="POST">
+    <form method="POST" id="loginForm">
         <div class="mb-3">
-            <label for="username" class="form-label">Username</label>
-            <input type="text" class="form-control" id="username" name="username" placeholder="Enter your username" required>
+            <label class="form-label">Username</label>
+            <input type="text" class="form-control" name="username" placeholder="Enter your username" required>
         </div>
+
         <div class="mb-3">
-            <label for="password" class="form-label">Password</label>
-            <input type="password" class="form-control" id="password" name="password" placeholder="Enter your password" required>
+            <label class="form-label">Password</label>
+            <input type="password" class="form-control" name="password" placeholder="Enter your password" required>
         </div>
+
         <div class="d-grid gap-2">
-            <button type="submit" class="btn btn-primary btn-lg">Login</button>
+            <button type="submit" class="btn btn-primary btn-lg" id="loginBtn">
+                <span id="btnText">Login</span>
+                <span id="btnSpinner" class="spinner-border spinner-border-sm d-none"></span>
+            </button>
+
             <a href="{{ url_for('boss_signup') }}" class="btn btn-secondary btn-lg">Sign Up</a>
         </div>
     </form>
+
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+    const form = document.getElementById("loginForm");
+    const button = document.getElementById("loginBtn");
+    const btnText = document.getElementById("btnText");
+    const spinner = document.getElementById("btnSpinner");
+
+    form.addEventListener("submit", function() {
+        button.disabled = true;
+        button.classList.add("loading");
+        btnText.textContent = "Logging in...";
+        spinner.classList.remove("d-none");
+    });
+</script>
+
 </body>
 </html>

@@ -113,6 +113,17 @@ button:hover {
 </head>
 <body>
 
+<!-- Header role-aware -->
+{% if role == 'boss' %}
+<h2>Karibu {{ session["boss_name"] }} 👋</h2>
+<p><strong>Role:</strong> Boss</p>
+<p><strong>Boss ID:</strong> {{ session["boss_id"] }}</p>
+{% elif role == 'staff' %}
+<h2>Karibu {{ session["staff_name"] }} 👋</h2>
+<p><strong>Role:</strong> {{ session["staff_role"] }}</p>
+<p><strong>Staff ID:</strong> {{ session["staff_id"] }}</p>
+{% endif %}
+
 <h2>Meters Hazijasomwa - Mwezi: {{ month }}</h2>
 
 <div class="form-container">
@@ -147,7 +158,7 @@ button:hover {
             </p>
 
             <!-- Role-aware action button -->
-            {% if 'boss_id' in session or 'staff_id' in session %}
+            {% if role == 'boss' or (role == 'staff' and session["staff_role"] == 'meter_reader') %}
                 <a href="{{ url_for('read_meter') }}?meter_number={{ customer.meter_number }}" class="action-btn">
                     📏 Soma Meter
                 </a>
@@ -160,7 +171,8 @@ button:hover {
     <div class="message success">✔ Meters zote zimesomwa mwezi huu.</div>
 {% endif %}
 
-<a class="back-link" href="{% if 'staff_id' in session %}{{ url_for('staff_dashboard') }}{% else %}{{ url_for('boss_dashboard') }}{% endif %}">
+<!-- Back link role-aware -->
+<a class="back-link" href="{% if role == 'staff' %}{{ url_for('staff_dashboard') }}{% else %}{{ url_for('boss_dashboard') }}{% endif %}">
     🔙 Rudi Dashboard
 </a>
 

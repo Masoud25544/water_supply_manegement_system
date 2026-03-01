@@ -4,10 +4,8 @@
     <meta charset="UTF-8">
     <title>Ongeza Staff</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
-
     <style>
         body {
             background: linear-gradient(135deg, #0d6efd, #0dcaf0);
@@ -15,29 +13,24 @@
             display: flex;
             align-items: center;
         }
-
         .main-card {
             border-radius: 18px;
             box-shadow: 0 15px 35px rgba(0,0,0,0.15);
             border: none;
         }
-
         .card-header {
             background: linear-gradient(135deg, #0d6efd, #0b5ed7);
             color: white;
             border-radius: 18px 18px 0 0;
         }
-
         .form-control, .form-select {
             border-radius: 10px;
             padding: 10px;
         }
-
         .form-control:focus, .form-select:focus {
             border-color: #0d6efd;
             box-shadow: 0 0 0 0.2rem rgba(13,110,253,.25);
         }
-
         .btn-gradient {
             background: linear-gradient(135deg, #198754, #20c997);
             border: none;
@@ -47,36 +40,27 @@
             padding: 10px;
             transition: 0.3s ease;
         }
-
         .btn-gradient:hover {
             transform: translateY(-2px);
             box-shadow: 0 8px 20px rgba(0,0,0,0.2);
         }
-
         .btn-secondary {
             border-radius: 10px;
         }
-
         .form-label {
             font-weight: 600;
         }
     </style>
 </head>
 <body>
-
 <div class="container">
     <div class="row justify-content-center">
         <div class="col-md-6">
-
             <div class="card main-card">
-                
                 <div class="card-header text-center py-3">
                     <h4><i class="bi bi-person-plus-fill"></i> Ongeza Staff Mpya</h4>
                 </div>
-
                 <div class="card-body p-4">
-
-                    <!-- Flash messages -->
                     {% with messages = get_flashed_messages(with_categories=true) %}
                       {% if messages %}
                         {% for category, message in messages %}
@@ -89,54 +73,44 @@
                     {% endwith %}
 
                     <form method="POST">
-
                         <div class="mb-3">
                             <label class="form-label">Jina Kamili</label>
                             <input type="text" class="form-control" name="full_name" required>
                         </div>
-
                         <div class="mb-3">
                             <label class="form-label">Username</label>
                             <input type="text" class="form-control" name="username" required>
                         </div>
-
                         <div class="mb-3">
                             <label class="form-label">Password</label>
                             <input type="password" class="form-control" name="password" required>
                         </div>
-
                         <div class="mb-4">
                             <label class="form-label">Jukumu la Staff</label>
                             <select name="role" class="form-select" required>
                                 <option value="">-- Chagua Jukumu --</option>
-                                <option value="Msomaji wa Meter">📟 Msomaji wa Meter</option>
-                                <option value="Mkusanyaji wa Malipo">💰 Mkusanyaji wa Malipo</option>
-                                <option value="Mhasibu">📊 Mhasibu</option>
-                                <option value="Msimamizi wa Wateja">👥 Msimamizi wa Wateja</option>
+                                <option value="meter_reader">📟 Msomaji wa Meter</option>
+                                <option value="cashier">💰 Mkusanyaji wa Malipo</option>
+                                <option value="accountant">📊 Mhasibu</option>
+                                <option value="customer_manager">👥 Msimamizi wa Wateja</option>
                             </select>
                         </div>
-
                         <div class="d-grid mb-3">
                             <button type="submit" class="btn btn-gradient">
                                 <i class="bi bi-check-circle-fill"></i> Sajili Staff
                             </button>
                         </div>
-
                         <div class="text-center">
                             <a href="{{ url_for('view_staff') }}" class="btn btn-secondary">
                                 <i class="bi bi-people-fill"></i> Angalia Staff Wote
                             </a>
                         </div>
-
                     </form>
-
                 </div>
             </div>
-
         </div>
     </div>
 </div>
-
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
