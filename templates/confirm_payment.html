@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="sw">
 <head>
     <meta charset="UTF-8">
     <title>Thibitisha Malipo</title>
@@ -104,8 +104,8 @@
     <ul>
         <li><span><strong>Bill ID:</strong></span> <span>{{ bill.bill_id }}</span></li>
         <li><span><strong>Meter Number:</strong></span> <span>{{ bill.meter_number or "Hakuna" }}</span></li>
-        <li><span><strong>Units Used:</strong></span> <span>{{ bill.units_used }}</span></li>
-        <li><span><strong>Kiasi:</strong></span> <span>{{ bill.amount }}</span></li>
+        <li><span><strong>Units Used:</strong></span> <span>{{ bill.units_used or 0 }}</span></li>
+        <li><span><strong>Kiasi:</strong></span> <span>Tsh {{ "{:,.2f}".format(bill.amount or 0) }}</span></li>
         <li><span><strong>Billing Month:</strong></span> <span>{{ bill.billing_month }}</span></li>
     </ul>
 
@@ -113,7 +113,10 @@
         <button type="submit" class="btn btn-success">
             <i class="bi bi-check-circle-fill"></i> Thibitisha Malipo
         </button>
-        <a href="{{ url_for('unpaid_bills') }}" class="btn btn-secondary">Rudia</a>
+
+        <!-- ✅ Button ya Rudi kwa dashboard sahihi kulingana na role -->
+        <a href="{% if user_role == 'staff' %}{{ url_for('staff_dashboard') }}{% else %}{{ url_for('boss_dashboard') }}{% endif %}" 
+           class="btn btn-secondary">Rudia</a>
     </form>
 </div>
 

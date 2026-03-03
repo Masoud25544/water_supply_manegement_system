@@ -15,20 +15,42 @@ app.secret_key = "supersecretkey"
 DB_PATH = "water_supply.db"
 
 from functools import wraps
+from flask import session, flash, redirect, url_for
 
-# 🔐 Decorator ya role-based access
-def role_required(required_role):
+# =================== MULTI-ROLE DECORATOR ===================
+def role_required(*allowed_roles):
+    """
+    Decorator ya Flask kwa role-based access control.
+    Roles zinazokubaliwa: 'boss', 'staff', 'admin'
+    """
     def decorator(f):
         @wraps(f)
-        def wrapper(*args, **kwargs):
-            if "staff_id" not in session:
-                flash("Tafadhali login kwanza", "danger")
-                return redirect(url_for("staff_login"))
-            if session.get("staff_role") != required_role:
-                flash("Huna ruhusa ya kufanya kazi hii", "danger")
+        def decorated_function(*args, **kwargs):
+            # Map role na session key yao
+            role_session_map = {
+                "boss": "boss_id",
+                "staff": "staff_id",
+                "admin": "superadmin_id"
+            }
+
+            for role in allowed_roles:
+                session_key = role_session_map.get(role)
+                if session_key and session_key in session:
+                    return f(*args, **kwargs)
+
+            flash("⚠️ Huna ruhusa ku-access ukurasa huu", "danger")
+            
+            # Redirect kulingana na priority
+            if "superadmin_id" in session:
+                return redirect(url_for("superadmin_dashboard"))
+            elif "boss_id" in session:
+                return redirect(url_for("boss_dashboard"))
+            elif "staff_id" in session:
                 return redirect(url_for("staff_dashboard"))
-            return f(*args, **kwargs)
-        return wrapper
+            else:
+                return redirect(url_for("login"))
+            
+        return decorated_function
     return decorator
 
 # ================= DATABASE CONNECTION ==================
@@ -723,18 +745,47 @@ def unread_meters():
 
 @app.route("/unpaid_bills")
 def unpaid_bills():
+    # Hakikisha user ameloga
+    if "boss_id" in session:
+        user_role = "boss"
+        boss_id = session["boss_id"]
+    elif "staff_id" in session:
+        user_role = "staff"
+        boss_id = session.get("boss_id")  # staff_id pia ina boss_id kwenye session
+    elif "superadmin_id" in session:
+        user_role = "superadmin"
+        boss_id = None
+    else:
+        flash("Tafadhali ingia kwanza", "danger")
+        return redirect(url_for("login"))  # login route yako ya default
+
+    # Unganisha DB
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    bills = conn.execute("""
-        SELECT b.*, c.full_name AS customer_name, m.meter_number
-        FROM bills b
-        JOIN customers c ON b.customer_id = c.customer_id
-        LEFT JOIN meters m ON c.customer_id = m.customer_id
-        WHERE b.status='UNPAID'
-        ORDER BY b.billing_month DESC
-    """).fetchall()
+
+    # Pata bills zisizolipwa, boss pekee (au zote kwa superadmin)
+    if user_role == "superadmin":
+        bills = conn.execute("""
+            SELECT b.*, c.full_name AS customer_name, m.meter_number
+            FROM bills b
+            JOIN customers c ON b.customer_id = c.customer_id
+            LEFT JOIN meters m ON c.customer_id = m.customer_id
+            WHERE b.status='UNPAID'
+            ORDER BY b.billing_month DESC
+        """).fetchall()
+    else:
+        bills = conn.execute("""
+            SELECT b.*, c.full_name AS customer_name, m.meter_number
+            FROM bills b
+            JOIN customers c ON b.customer_id = c.customer_id
+            LEFT JOIN meters m ON c.customer_id = m.customer_id
+            WHERE b.status='UNPAID' AND c.boss_id = ?
+            ORDER BY b.billing_month DESC
+        """, (boss_id,)).fetchall()
+
     conn.close()
-    return render_template("unpaid_bills.html", unpaid_bills=bills)
+
+    return render_template("unpaid_bills.html", unpaid_bills=bills, user_role=user_role)
                                
 @app.route("/boss/customers")
 def boss_view_customers():

@@ -81,9 +81,16 @@
                 🖨 Print / Save as PDF
             </button>
 
-            <a href="{{ url_for('boss_dashboard') }}" class="btn btn-secondary">
-                Rudi Dashboard
-            </a>
+            <!-- ✅ Conditional Dashboard Link -->
+            {% if user_role == 'staff' %}
+                <a href="{{ url_for('staff_dashboard') }}" class="btn btn-secondary">
+                    Rudi Dashboard
+                </a>
+            {% else %}
+                <a href="{{ url_for('boss_dashboard') }}" class="btn btn-secondary">
+                    Rudi Dashboard
+                </a>
+            {% endif %}
         </div>
 
     </div>
