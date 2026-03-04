@@ -261,6 +261,8 @@ def boss_login():
 
     return render_template("boss_login.html")
     
+
+
 @app.route("/boss_dashboard")
 def boss_dashboard():
     if "boss_id" not in session:
@@ -273,7 +275,10 @@ def boss_dashboard():
     conn.row_factory = sqlite3.Row
 
     # Pata info ya boss
-    boss = conn.execute("SELECT * FROM boss WHERE boss_id=?", (boss_id,)).fetchone()
+    boss = conn.execute(
+        "SELECT * FROM boss WHERE boss_id=?",
+        (boss_id,)
+    ).fetchone()
 
     # Pata wateja wote
     customers_raw = conn.execute("""
@@ -292,26 +297,31 @@ def boss_dashboard():
         )
     """, (boss_id,)).fetchall()
 
-    # Pata unpaid bills
+    # ✅ REKEBISHO LIPO HAPA (JOIN kwa meter_id badala ya customer_id)
     unpaid_bills = conn.execute("""
-        SELECT b.*, c.full_name AS customer_name, m.meter_number
+        SELECT b.*, 
+               c.full_name AS customer_name, 
+               m.meter_number
         FROM bills b
         JOIN customers c ON b.customer_id = c.customer_id
-        LEFT JOIN meters m ON c.customer_id = m.customer_id
-        WHERE b.status='UNPAID' AND c.boss_id=?
+        LEFT JOIN meters m ON b.meter_id = m.meter_id
+        WHERE b.status='UNPAID' 
+          AND c.boss_id=?
         ORDER BY b.billing_month DESC
     """, (boss_id,)).fetchall()
 
-    # Jumla za statistics
+    # Jumla ya unpaid bills
     total_unpaid_amount = conn.execute("""
-        SELECT SUM(amount) as total
+        SELECT SUM(b.amount) as total
         FROM bills b
         JOIN customers c ON b.customer_id = c.customer_id
-        WHERE b.status='UNPAID' AND c.boss_id=?
+        WHERE b.status='UNPAID' 
+          AND c.boss_id=?
     """, (boss_id,)).fetchone()['total'] or 0
 
+    # Jumla ya malipo yote
     total_payments = conn.execute("""
-        SELECT SUM(amount_paid) as total
+        SELECT SUM(p.amount_paid) as total
         FROM payments p
         JOIN customers c ON p.customer_id = c.customer_id
         WHERE c.boss_id=?
@@ -319,9 +329,10 @@ def boss_dashboard():
 
     conn.close()
 
-    # Fanya dictionary ya wateja na list ya meters zao
+    # Tengeneza dictionary ya wateja na meters zao
     customers = []
     meters_map = {}
+
     for m in meters_raw:
         meters_map.setdefault(m['customer_id'], []).append({
             'meter_number': m['meter_number'],
@@ -335,10 +346,13 @@ def boss_dashboard():
 
     # Hesabu meters active na inactive
     active_meters = sum(
-        1 for mlist in meters_map.values() for m in mlist if m['status'] == 'ACTIVE'
+        1 for mlist in meters_map.values()
+        for m in mlist if m['status'] == 'ACTIVE'
     )
+
     inactive_meters = sum(
-        1 for mlist in meters_map.values() for m in mlist if m['status'] == 'INACTIVE'
+        1 for mlist in meters_map.values()
+        for m in mlist if m['status'] == 'INACTIVE'
     )
 
     return render_template(
@@ -543,9 +557,9 @@ def read_meter():
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Angalia meter ipo na ni ya wateja wa boss/staff
+        # Angalia meter ipo, ni ya wateja wa boss/staff, na ACTIVE
         cur.execute("""
-            SELECT m.meter_id, m.customer_id, c.full_name
+            SELECT m.meter_id, m.customer_id, m.status AS meter_status, c.full_name
             FROM meters m
             JOIN customers c ON m.customer_id = c.customer_id
             WHERE m.meter_number=? AND c.boss_id=?
@@ -554,6 +568,12 @@ def read_meter():
 
         if not meter:
             flash("Meter hii haipo au sio ya wateja wako", "danger")
+            conn.close()
+            return render_template("read_meter.html", bill=None)
+
+        # Check meter status
+        if meter["meter_status"] != "ACTIVE":
+            flash("⚠️ Meter hii imezimwa (INACTIVE), haiwezi kusomwa", "warning")
             conn.close()
             return render_template("read_meter.html", bill=None)
 
@@ -613,7 +633,6 @@ def read_meter():
         flash(f"✅ Meter {meter_number} imesomwa kwa {meter['full_name']}", "success")
 
     return render_template("read_meter.html", bill=bill)
-
 
 
 @app.route("/boss/meters")
@@ -748,12 +767,11 @@ def unread_meters():
         boss_id = session.get("staff_boss_id")
 
         # 2a️⃣ Hakikisha staff ana jukumu la kusoma meter
-        staff_role = session.get("staff_role")  # Lazima iwe ime-set wakati wa login
+        staff_role = session.get("staff_role")
         if staff_role != "meter_reader":
             flash("Huna ruhusa ya kuona meters hizi.", "danger")
             return redirect(url_for("staff_dashboard"))
     else:
-        # Hii hali haipaswi kutokea, lakini hakikisha
         flash("Huna ruhusa ya kuona ukurasa huu.", "danger")
         return redirect(url_for("login"))
 
@@ -764,7 +782,7 @@ def unread_meters():
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # 4️⃣ Pata signup date ya boss ili kudhibitisha mwezi
+    # 4️⃣ Pata signup date ya boss
     cur.execute("SELECT signup_date FROM boss WHERE boss_id = ?", (boss_id,))
     boss_data = cur.fetchone()
     if not boss_data:
@@ -773,7 +791,6 @@ def unread_meters():
         return redirect(url_for("staff_dashboard") if role == "staff" else url_for("boss_dashboard"))
 
     signup_month = boss_data["signup_date"][:7]
-
     if selected_month < signup_month:
         conn.close()
         return render_template(
@@ -785,7 +802,6 @@ def unread_meters():
             current_month=current_month,
             role=role
         )
-
     if selected_month > current_month:
         conn.close()
         return render_template(
@@ -798,26 +814,25 @@ def unread_meters():
             role=role
         )
 
-    # 5️⃣ Pata meters ambazo hazijasomwa
+    # 5️⃣ Pata meters ambazo hazijasomwa kwa mwezi huu
     query = """
     SELECT c.customer_id, c.full_name, c.phone, c.area,
-           m.meter_number, m.status AS meter_status
-    FROM customers c
-    JOIN meters m ON c.customer_id = m.customer_id
+           m.meter_id, m.meter_number, m.status AS meter_status
+    FROM meters m
+    JOIN customers c ON m.customer_id = c.customer_id
     WHERE c.boss_id = ?
     AND NOT EXISTS (
         SELECT 1 FROM bills b
-        WHERE b.customer_id = c.customer_id
+        WHERE b.meter_id = m.meter_id
         AND b.billing_month = ?
     )
-    ORDER BY c.full_name
+    ORDER BY c.full_name, m.created_at ASC
     """
     cur.execute(query, (boss_id, selected_month))
     unread = cur.fetchall()
     unread_count = len(unread)
     conn.close()
 
-    # 6️⃣ Rudisha template na role ili kurudi kwenye dashboard sahihi
     return render_template(
         "unread_meters.html",
         unread=unread,
@@ -832,11 +847,8 @@ def unread_meters():
 @app.route("/unpaid_bills")
 def unpaid_bills():
     """
-    Route ya kuonyesha bills zisizolipwa.
-    Inashughulikia:
-    - Boss: anaona bills za wateja wake
-    - Staff: anaona bills za wateja wa boss wake pekee
-    - Superadmin: anaona zote
+    Route ya kuonyesha bills zisizolipwa kwa kila role.
+    Kila bill ina meter yake halisi, hakuna duplication au 'Hakuna'.
     """
     # ======== Hakikisha user ameloga ========
     if "boss_id" in session:
@@ -844,85 +856,72 @@ def unpaid_bills():
         boss_id = session.get("boss_id")
     elif "staff_id" in session:
         user_role = "staff"
-        boss_id = session.get("staff_boss_id")  # Hii ndio sahihi
+        boss_id = session.get("staff_boss_id")
     elif "superadmin_id" in session:
         user_role = "superadmin"
         boss_id = None
     else:
         flash("Tafadhali ingia kwanza", "danger")
-        return redirect(url_for("login"))  # login route yako ya default
+        return redirect(url_for("login"))
 
-    # ======== Debug prints ========
-    print("DEBUG: user_role =", user_role)
-    print("DEBUG: boss_id =", boss_id)
-    print("DEBUG: session =", dict(session))
-
-    # ======== Unganisha DB ========
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
 
     # ======== Pata bills zisizolipwa ========
     if user_role == "superadmin":
         bills = conn.execute("""
-            SELECT b.*, c.full_name AS customer_name, m.meter_number
+            SELECT b.bill_id, b.customer_id, b.units_used, b.amount, b.billing_month,
+                   c.full_name AS customer_name,
+                   m.meter_number
             FROM bills b
             JOIN customers c ON b.customer_id = c.customer_id
-            LEFT JOIN meters m ON c.customer_id = m.customer_id
+            JOIN meters m ON b.meter_id = m.meter_id
             WHERE b.status='UNPAID'
             ORDER BY b.billing_month DESC
         """).fetchall()
     else:
         bills = conn.execute("""
-            SELECT b.*, c.full_name AS customer_name, m.meter_number
+            SELECT b.bill_id, b.customer_id, b.units_used, b.amount, b.billing_month,
+                   c.full_name AS customer_name,
+                   m.meter_number
             FROM bills b
             JOIN customers c ON b.customer_id = c.customer_id
-            LEFT JOIN meters m ON c.customer_id = m.customer_id
+            JOIN meters m ON b.meter_id = m.meter_id
             WHERE b.status='UNPAID' AND c.boss_id = ?
             ORDER BY b.billing_month DESC
         """, (boss_id,)).fetchall()
 
     conn.close()
 
-    # ======== Debug prints ========
-    print("DEBUG: bills fetched =", len(bills))
-    for b in bills:
-        print(f"DEBUG: bill_id={b['bill_id']}, customer={b['customer_name']}, amount={b['amount']}")
-
     # ======== Return template ========
     return render_template("unpaid_bills.html", unpaid_bills=bills, user_role=user_role)
                                
 @app.route("/boss/customers")
 def boss_view_customers():
-    # 1️⃣ Hakikisha boss ameingia
     if "boss_id" not in session:
         flash("Tafadhali ingia kwanza", "danger")
         return redirect(url_for("boss_login"))
 
     boss_id = session["boss_id"]
-
-    # 2️⃣ Unganisha na database
     conn = get_db_connection()
-    cur = conn.cursor()
+    conn.row_factory = sqlite3.Row
 
-    # 3️⃣ Chukua wateja wote wa boss na meter zao
-    cur.execute("""
+    # Chukua customers na meters zao zote (row moja kwa customer)
+    customers = conn.execute("""
         SELECT c.customer_id, c.full_name AS customer_name,
                c.phone, c.area, c.house_number,
                c.status AS customer_status,
-               m.meter_number, m.status AS meter_status
+               GROUP_CONCAT(m.meter_number) AS meters,
+               GROUP_CONCAT(m.status) AS meter_statuses
         FROM customers c
         LEFT JOIN meters m ON c.customer_id = m.customer_id
         WHERE c.boss_id = ?
+        GROUP BY c.customer_id
         ORDER BY c.full_name
-    """, (boss_id,))
-    
-    customers = cur.fetchall()
-    conn.close()
+    """, (boss_id,)).fetchall()
 
-    # 4️⃣ Rudisha data kwenye template
-    return render_template("boss_customers.html", customers=customers)   
-    
-                                                                            
+    conn.close()
+    return render_template("boss_customers.html", customers=customers)
 @app.route("/boss/toggle_meter/<meter_number>")
 def toggle_meter(meter_number):
     # Hakikisha boss amelogin
@@ -936,7 +935,7 @@ def toggle_meter(meter_number):
 
     # Hakikisha meter ipo na ni ya mteja wa boss huyu
     cur.execute("""
-        SELECT status FROM meters m
+        SELECT m.status FROM meters m
         JOIN customers c ON m.customer_id = c.customer_id
         WHERE m.meter_number = ? AND c.boss_id = ?
     """, (meter_number, boss_id))
@@ -957,7 +956,7 @@ def toggle_meter(meter_number):
 
     conn.commit()
     conn.close()
-    flash("Status ya meter imebadilishwa", "success")
+    flash(f"Meter {meter_number} imebadilishwa kuwa {new_status}", "success")
     return redirect(url_for("boss_view_customers"))
     
 @app.route("/boss/toggle_customer/<customer_id>")
