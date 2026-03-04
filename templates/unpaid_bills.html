@@ -5,28 +5,109 @@
 <title>Bili Zisizolipwa</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 
-<!-- Bootstrap CSS & Icons -->
+<!-- Fonts & Bootstrap -->
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
 
 <style>
-body { background-color: #f0f2f5; font-family: 'Segoe UI', sans-serif; margin:0; padding:20px; }
-h1 { margin-bottom:20px; font-weight:bold; color:#0d6efd; }
-.card { border-radius:12px; box-shadow:0 4px 10px rgba(0,0,0,0.05); padding:20px; }
-.table-responsive { max-height:600px; overflow-y:auto; }
-.btn { min-width:140px; }
-.flash { padding:10px; margin-bottom:15px; border-radius:8px; font-size:14px; }
+html, body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    font-family: 'Inter', sans-serif;
+    background: linear-gradient(135deg, #e0f7fa, #fce4ec);
+}
+
+body {
+    display: flex;
+    flex-direction: column;
+}
+
+.container-full {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+}
+
+.card {
+    border-radius:12px;
+    box-shadow:0 6px 20px rgba(0,0,0,0.1);
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 25px;
+    overflow: hidden;
+    background: linear-gradient(145deg, #ffffff, #f8f9fa);
+}
+
+h1 {
+    font-weight:700;
+    color:#0d6efd;
+    margin-bottom:20px;
+    text-align: center;
+    text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
+}
+
+.flash {
+    padding:12px;
+    margin-bottom:15px;
+    border-radius:8px;
+    font-size:14px;
+}
 .success { background-color:#d1e7dd; color:#0f5132; }
 .danger { background-color:#f8d7da; color:#842029; }
 .warning { background-color:#fff3cd; color:#856404; }
+
+.table-responsive {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.table th {
+    background: linear-gradient(90deg, #0d6efd, #6610f2);
+    color: white;
+}
+
+.table-hover tbody tr:hover {
+    background-color: rgba(13,110,253,0.08);
+}
+
+.table td {
+    vertical-align: middle;
+}
+
+.btn {
+    min-width:140px;
+    transition: all 0.2s;
+}
+
+.btn-success {
+    background-color: #28a745;
+    border: none;
+}
+.btn-success:hover {
+    background-color: #218838;
+}
+
+.btn-outline-secondary {
+    border-color: #6c757d;
+    color: #6c757d;
+}
+.btn-outline-secondary:hover {
+    background-color: #6c757d;
+    color: white;
+}
+
 </style>
 </head>
 <body>
 
-<div class="container">
+<div class="container-full">
 
     <div class="card">
-        <h1 class="text-center">Bili Zisizolipwa</h1>
+        <h1>Bili Zisizolipwa</h1>
 
         <!-- Flash messages -->
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -40,18 +121,18 @@ h1 { margin-bottom:20px; font-weight:bold; color:#0d6efd; }
             {% endif %}
         {% endwith %}
 
-        <!-- 🔹 Button ya Kurudi Dashboard kwa role sahihi -->
-        <div class="mb-3">
+        <!-- Back to dashboard -->
+        <div class="mb-3 d-flex justify-content-start">
             {% if user_role == "boss" %}
-                <a href="{{ url_for('boss_dashboard') }}" class="btn btn-secondary">
+                <a href="{{ url_for('boss_dashboard') }}" class="btn btn-outline-secondary">
                     <i class="bi bi-arrow-left"></i> Rudi Dashboard
                 </a>
             {% elif user_role == "staff" %}
-                <a href="{{ url_for('staff_dashboard') }}" class="btn btn-secondary">
+                <a href="{{ url_for('staff_dashboard') }}" class="btn btn-outline-secondary">
                     <i class="bi bi-arrow-left"></i> Rudi Dashboard
                 </a>
             {% elif user_role == "superadmin" %}
-                <a href="{{ url_for('superadmin_dashboard') }}" class="btn btn-secondary">
+                <a href="{{ url_for('superadmin_dashboard') }}" class="btn btn-outline-secondary">
                     <i class="bi bi-arrow-left"></i> Rudi Dashboard
                 </a>
             {% endif %}
@@ -59,8 +140,8 @@ h1 { margin-bottom:20px; font-weight:bold; color:#0d6efd; }
 
         <!-- Table ya Bills -->
         <div class="table-responsive">
-            <table class="table table-striped table-bordered align-middle text-center">
-                <thead class="table-dark">
+            <table class="table table-striped table-bordered table-hover align-middle text-center">
+                <thead>
                     <tr>
                         <th>#</th>
                         <th>Customer Name</th>
@@ -76,7 +157,7 @@ h1 { margin-bottom:20px; font-weight:bold; color:#0d6efd; }
                     {% for bill in unpaid_bills %}
                     <tr>
                         <td>{{ loop.index }}</td>
-                        <td>{{ bill.customer_name }}</td>
+                        <td class="text-start">{{ bill.customer_name }}</td>
                         <td>{{ bill.bill_id }}</td>
                         <td>{{ bill.meter_number or "Hakuna" }}</td>
                         <td>{{ bill.units_used or 0 }}</td>
@@ -84,16 +165,14 @@ h1 { margin-bottom:20px; font-weight:bold; color:#0d6efd; }
                         <td>{{ bill.billing_month }}</td>
                         <td>
                             <a href="{{ url_for('receive_payment', bill_id=bill.bill_id) }}" 
-                               class="btn btn-sm btn-success">
-                               <i class="bi bi-cash-coin"></i> Pokea Malipo
+                               class="btn btn-sm btn-success d-flex align-items-center gap-1">
+                               <i class="bi bi-cash-coin"></i> Pokea
                             </a>
                         </td>
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="8" class="text-muted">
-                            Hakuna bili zisizolipwa kwa sasa
-                        </td>
+                        <td colspan="8" class="text-muted">Hakuna bili zisizolipwa kwa sasa</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -104,8 +183,6 @@ h1 { margin-bottom:20px; font-weight:bold; color:#0d6efd; }
 
 </div>
 
-<!-- Bootstrap JS -->
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-
 </body>
 </html>

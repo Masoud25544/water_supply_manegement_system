@@ -5,13 +5,8 @@
     <title>Boss Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
-
     <style>
-        html, body {
-            height: 100%;
-            margin: 0;
-        }
-
+        html, body { height: 100%; margin: 0; }
         body {
             background-color: #f0f2f5;
             background-image: url('{{ url_for("static", filename="img/water_pipe_bg.png") }}');
@@ -20,15 +15,10 @@
             background-repeat: no-repeat;
             background-attachment: fixed;
             color: #000;
-            transition: all 0.3s ease;
             display: flex;
             flex-direction: column;
         }
-
-        body.dark-mode {
-            background-color: #121212;
-            color: #f5f5f5;
-        }
+        body.dark-mode { background-color: #121212; color: #f5f5f5; }
 
         .overlay {
             background-color: rgba(255,255,255,0.95);
@@ -37,44 +27,31 @@
             box-shadow: 0 4px 15px rgba(0,0,0,0.1);
             width: 100%;
             flex: 1;
-            box-sizing: border-box;
             overflow-y: auto;
         }
+        body.dark-mode .overlay { background-color: rgba(30,30,30,0.95); }
 
-        body.dark-mode .overlay {
-            background-color: rgba(30,30,30,0.95);
-        }
+        .card { border-radius: 12px; box-shadow: 0 3px 8px rgba(0,0,0,0.05); }
+        body.dark-mode .card { background-color: #1f1f1f; color: #f5f5f5; }
 
-        .card {
-            border-radius: 12px;
-            box-shadow: 0 3px 8px rgba(0,0,0,0.05);
-        }
+        .table th, .table td { vertical-align: middle; }
+        body.dark-mode .table { color: #f5f5f5; }
 
-        body.dark-mode .card {
-            background-color: #1f1f1f;
-            color: #f5f5f5;
-        }
+        .btn { min-width: 100px; }
+        .table-responsive { max-height: 500px; overflow-y: auto; }
 
-        .table th, .table td {
-            vertical-align: middle;
+        /* WATERMARK STYLE */
+        .watermark-text {
+            font-size: 22px;
+            font-weight: bold;
+            text-align: center;
+            margin-top: 20px;
+            letter-spacing: 3px;
+            color: rgba(0,0,0,0.08);
+            user-select: none;
+            pointer-events: none;
         }
-
-        body.dark-mode .table {
-            color: #f5f5f5;
-        }
-
-        .btn {
-            min-width: 100px;
-        }
-
-        #readMeterForm input {
-            margin-bottom: 10px;
-        }
-
-        .table-responsive {
-            max-height: 500px;
-            overflow-y: auto;
-        }
+        body.dark-mode .watermark-text { color: rgba(255,255,255,0.08); }
     </style>
 </head>
 <body>
@@ -107,42 +84,56 @@
 
         <!-- QUICK STATS -->
         <div class="row g-3 mb-4 text-center">
-            <div class="col-md-3">
+            <div class="col-md-2">
                 <div class="card text-bg-primary mb-3">
                     <div class="card-body">
-                        <h5><i class="bi bi-people-fill"></i> Wateja Wote</h5>
-                        <p class="fs-4">{{ customers|length }}</p>
+                        <h6><i class="bi bi-people-fill"></i> Wateja Wote</h6>
+                        <p class="fs-5">{{ customers|length }}</p>
                     </div>
                 </div>
             </div>
 
-            <div class="col-md-3">
+            <div class="col-md-2">
                 <div class="card text-bg-success mb-3">
                     <div class="card-body">
-                        <h5><i class="bi bi-speedometer2"></i> Meters ACTIVE</h5>
-                        <p class="fs-4">
-                            {{ customers|selectattr('meter_status','equalto','ACTIVE')|list|length }}
-                        </p>
+                        <h6><i class="bi bi-speedometer2"></i> Meters ACTIVE</h6>
+                        <p class="fs-5">{{ active_meters }}</p>
                     </div>
                 </div>
             </div>
 
-            <div class="col-md-3">
+            <div class="col-md-2">
                 <div class="card text-bg-secondary mb-3">
                     <div class="card-body">
-                        <h5><i class="bi bi-slash-circle"></i> Meters INACTIVE</h5>
-                        <p class="fs-4">
-                            {{ customers|selectattr('meter_status','equalto','INACTIVE')|list|length }}
-                        </p>
+                        <h6><i class="bi bi-slash-circle"></i> Meters INACTIVE</h6>
+                        <p class="fs-5">{{ inactive_meters }}</p>
                     </div>
                 </div>
             </div>
 
-            <div class="col-md-3">
+            <div class="col-md-2">
                 <div class="card text-bg-danger mb-3">
                     <div class="card-body">
-                        <h5><i class="bi bi-exclamation-circle-fill"></i> Bili Zisizolipwa</h5>
-                        <p class="fs-4">{{ unpaid_bills|length }}</p>
+                        <h6><i class="bi bi-exclamation-circle-fill"></i> Bili Zisizolipwa</h6>
+                        <p class="fs-5">{{ unpaid_count }}</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-2">
+                <div class="card text-bg-warning mb-3">
+                    <div class="card-body">
+                        <h6><i class="bi bi-cash-stack"></i> Jumla Bili</h6>
+                        <p class="fs-5">{{ total_unpaid_amount }}</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-2">
+                <div class="card text-bg-info mb-3">
+                    <div class="card-body">
+                        <h6><i class="bi bi-credit-card"></i> Jumla Malipo</h6>
+                        <p class="fs-5">{{ total_payments }}</p>
                     </div>
                 </div>
             </div>
@@ -153,28 +144,21 @@
             <a href="{{ url_for('add_customer') }}" class="btn btn-success">
                 <i class="bi bi-person-plus-fill"></i> Sajiri Mteja
             </a>
-
             <a href="{{ url_for('boss_tariff') }}" class="btn btn-warning">
                 <i class="bi bi-cash-stack"></i> Weka Bei
             </a>
-
             <a href="{{ url_for('unread_meters') }}" class="btn btn-dark">
                 <i class="bi bi-exclamation-triangle-fill"></i> Meters Hazijasomwa
             </a>
-
             <a href="{{ url_for('unpaid_bills') }}" class="btn btn-danger">
                 <i class="bi bi-exclamation-circle-fill"></i> Bili Zisizolipwa
             </a>
-
             <a href="{{ url_for('boss_view_customers') }}" class="btn btn-primary">
                 <i class="bi bi-people-fill"></i> Manage Customers
             </a>
-
-            <!-- STAFF MANAGEMENT -->
             <a href="{{ url_for('add_staff') }}" class="btn btn-info">
                 <i class="bi bi-person-plus"></i> Sajili Staff
             </a>
-
             <a href="{{ url_for('view_staff') }}" class="btn btn-secondary">
                 <i class="bi bi-people"></i> Manage Staff
             </a>
@@ -183,12 +167,9 @@
         <!-- SOMA METER -->
         <div class="mb-4">
             <h4>Soma Meter</h4>
-            <form method="POST" action="{{ url_for('read_meter') }}"
-                  class="d-flex flex-column flex-md-row gap-2 w-100">
-                <input type="text" name="meter_number"
-                       placeholder="Meter Number" required class="form-control">
-                <input type="number" step="0.01" name="current_reading"
-                       placeholder="Current Reading" required class="form-control">
+            <form method="POST" action="{{ url_for('read_meter') }}" class="d-flex flex-column flex-md-row gap-2 w-100">
+                <input type="text" name="meter_number" placeholder="Meter Number" required class="form-control">
+                <input type="number" step="0.01" name="current_reading" placeholder="Current Reading" required class="form-control">
                 <button type="submit" class="btn btn-primary">
                     <i class="bi bi-speedometer2"></i> Soma
                 </button>
@@ -230,17 +211,11 @@
                     </td>
                     <td>
                         {% if m.meter_number %}
-                            <a href="{{ url_for('edit_customer', customer_id=m.customer_id) }}"
-                               class="btn btn-sm btn-info mb-1">Edit</a>
-                            <a href="{{ url_for('delete_customer', customer_id=m.customer_id) }}"
-                               class="btn btn-sm btn-danger mb-1">Delete</a>
-
+                            <a href="{{ url_for('edit_customer', customer_id=m.customer_id) }}" class="btn btn-sm btn-info mb-1">Edit</a>
+                            <a href="{{ url_for('delete_customer', customer_id=m.customer_id) }}" class="btn btn-sm btn-danger mb-1">Delete</a>
                             {% for bill in unpaid_bills %}
                                 {% if bill.customer_id == m.customer_id %}
-                                    <a href="{{ url_for('receive_payment', bill_id=bill.bill_id) }}"
-                                       class="btn btn-sm btn-success mb-1">
-                                       Pokea Malipo
-                                    </a>
+                                    <a href="{{ url_for('receive_payment', bill_id=bill.bill_id) }}" class="btn btn-sm btn-success mb-1">Pokea Malipo</a>
                                 {% endif %}
                             {% endfor %}
                         {% else %}
@@ -253,14 +228,15 @@
         </table>
         </div>
 
+        <!-- WATERMARK -->
+        <div class="watermark-text">Masoud Tech Solution</div>
+
     </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-
 <script>
 const themeToggle = document.getElementById('themeToggle');
-
 function applyTheme(theme) {
     if(theme === 'dark') {
         document.body.classList.add('dark-mode');
@@ -270,10 +246,8 @@ function applyTheme(theme) {
         themeToggle.textContent = '🌙 Dark Mode';
     }
 }
-
 const savedTheme = localStorage.getItem('theme') || 'light';
 applyTheme(savedTheme);
-
 themeToggle.addEventListener('click', () => {
     const newTheme = document.body.classList.contains('dark-mode') ? 'light' : 'dark';
     applyTheme(newTheme);

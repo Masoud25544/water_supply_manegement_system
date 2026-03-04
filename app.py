@@ -5,7 +5,6 @@ from datetime import datetime, timedelta
 import uuid
 import random
 import string
-import uuid
 
 def generate_staff_id():
     return "STF-" + str(uuid.uuid4())[:8]
@@ -17,6 +16,16 @@ DB_PATH = "water_supply.db"
 from functools import wraps
 from flask import session, flash, redirect, url_for
 
+# ====================== MAKE SESSION TEMPORARY ======================
+@app.before_request
+def make_session_temporary():
+    """
+    Hii function inafanya kila session kuwa non-permanent.
+    Matokeo:
+    - Session hazibaki kwenye browser baada ya browser kufungwa.
+    - Hakuna session ya old boss/staff itakayopingana na login mpya.
+    """
+    session.permanent = False
 # =================== MULTI-ROLE DECORATOR ===================
 def role_required(*allowed_roles):
     """
@@ -223,30 +232,24 @@ def boss_login():
         boss = cur.fetchone()
 
         if boss and check_password_hash(boss["password"], password):
-
-            # 1️⃣ Check kama trial imeisha kwanza
+            # 1️⃣ Check trial
             now = datetime.now()
             trial_end = datetime.strptime(boss["trial_end_date"], "%Y-%m-%d %H:%M:%S")
-
             if now > trial_end:
-                # Badilisha status kuwa INACTIVE
-                cur.execute(
-                    "UPDATE boss SET status=? WHERE boss_id=?",
-                    ("INACTIVE", boss["boss_id"])
-                )
+                cur.execute("UPDATE boss SET status=? WHERE boss_id=?", ("INACTIVE", boss["boss_id"]))
                 conn.commit()
                 conn.close()
-
-                flash("Trial imeisha. Account yako sasa ni INACTIVE. Wasiliana na Admin kwa malipo.", "danger")
+                flash("Trial imeisha. Account yako ni INACTIVE. Wasiliana na admin.", "danger")
                 return redirect(url_for("boss_login"))
 
-            # 2️⃣ Baada ya kuhakikisha trial haijaisha, check status
+            # 2️⃣ Check status
             if boss["status"] != "ACTIVE":
                 conn.close()
-                flash("Account yako ni INACTIVE. Wasiliana na Admin kwa malipo.", "danger")
+                flash("Account yako ni INACTIVE. Wasiliana na admin.", "danger")
                 return redirect(url_for("boss_login"))
 
-            # 3️⃣ Login success
+            # 3️⃣ Login success – safisha session kwanza
+            session.clear()  # Hii ni muhimu
             session["boss_id"] = boss["boss_id"]
             conn.close()
             flash(f"Karibu, {boss['full_name']}!", "success")
@@ -262,7 +265,7 @@ def boss_login():
 def boss_dashboard():
     if "boss_id" not in session:
         flash("Tafadhali ingia kwanza", "danger")
-        return redirect(url_for("boss_login"))  # ✅ Imebadilishwa
+        return redirect(url_for("boss_login"))
 
     boss_id = session["boss_id"]
 
@@ -272,7 +275,7 @@ def boss_dashboard():
     # Pata info ya boss
     boss = conn.execute("SELECT * FROM boss WHERE boss_id=?", (boss_id,)).fetchone()
 
-    # Pata wateja wote pamoja na meters zao
+    # Pata wateja wote na meters zao
     customers = conn.execute("""
         SELECT c.customer_id, c.full_name, c.phone, c.area, c.house_number,
                m.meter_number, COALESCE(m.status,'INACTIVE') AS meter_status
@@ -283,8 +286,8 @@ def boss_dashboard():
     """, (boss_id,)).fetchall()
 
     # Hesabu meters ACTIVE na INACTIVE
-    active_meters = len([c for c in customers if c['meter_status']=='ACTIVE'])
-    inactive_meters = len([c for c in customers if c['meter_status']=='INACTIVE'])
+    active_meters = len([c for c in customers if c['meter_status'] == 'ACTIVE'])
+    inactive_meters = len([c for c in customers if c['meter_status'] == 'INACTIVE'])
 
     # Pata unpaid bills kwa boss huyu
     unpaid_bills = conn.execute("""
@@ -297,15 +300,35 @@ def boss_dashboard():
     """, (boss_id,)).fetchall()
     unpaid_count = len(unpaid_bills)
 
+    # Jumla ya pesa zisizolipwa (from bills.amount)
+    total_unpaid_amount = conn.execute("""
+        SELECT SUM(amount) as total
+        FROM bills b
+        JOIN customers c ON b.customer_id = c.customer_id
+        WHERE b.status='UNPAID' AND c.boss_id=?
+    """, (boss_id,)).fetchone()['total'] or 0
+
+    # Jumla ya payments zilizolipwa (from payments.amount_paid)
+    total_payments = conn.execute("""
+        SELECT SUM(amount_paid) as total
+        FROM payments p
+        JOIN customers c ON p.customer_id = c.customer_id
+        WHERE c.boss_id=?
+    """, (boss_id,)).fetchone()['total'] or 0
+
     conn.close()
 
-    return render_template("boss_dashboard.html",
-                           boss=boss,
-                           customers=customers,
-                           active_meters=active_meters,
-                           inactive_meters=inactive_meters,
-                           unpaid_bills=unpaid_bills,
-                           unpaid_count=unpaid_count)
+    return render_template(
+        "boss_dashboard.html",
+        boss=boss,
+        customers=customers,
+        active_meters=active_meters,
+        inactive_meters=inactive_meters,
+        unpaid_bills=unpaid_bills,
+        unpaid_count=unpaid_count,
+        total_unpaid_amount=total_unpaid_amount,
+        total_payments=total_payments
+    )
 @app.route("/boss/logout")
 def boss_logout():
     session.pop("boss_id", None)
@@ -314,6 +337,7 @@ def boss_logout():
 
 
 # ================= CUSTOMER MANAGEMENT ==================
+
 @app.route("/boss/add_customer", methods=["GET", "POST"])
 def add_customer():
     if "boss_id" not in session:
@@ -336,59 +360,49 @@ def add_customer():
         cur = conn.cursor()
 
         try:
-            # ✅ Check kama meter ipo tayari
-            cur.execute("SELECT 1 FROM meters WHERE meter_number = ?", (meter_number,))
+            # ✅ Angalia kama meter ipo tayari
+            cur.execute("SELECT * FROM meters WHERE meter_number = ?", (meter_number,))
             if cur.fetchone():
-                flash("⚠️ Tafadhari meter namba uliyo ingiza  tayari imesajiliwa kwenyevmfumo.", "warning")
-                conn.close()
+                flash(f"⚠️ Meter {meter_number} tayari ipo kwenye mfumo.", "warning")
                 return redirect(url_for("add_customer"))
 
-            customer_id = "CUST-" + str(uuid.uuid4())[:8]
-            meter_id = "MTR-" + str(uuid.uuid4())[:8]
+            # ✅ Angalia kama mteja tayari yupo kwa jina + simu + boss_id
+            cur.execute("SELECT * FROM customers WHERE full_name=? AND phone=? AND boss_id=?",
+                        (full_name, phone, session["boss_id"]))
+            existing_customer = cur.fetchone()
+
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             status = "ACTIVE"
 
-            # ✅ Insert customer
-            cur.execute("""
-                INSERT INTO customers 
-                (customer_id, boss_id, full_name, phone, area, house_number, meter_number, status, created_at, signup_date)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                customer_id,
-                session["boss_id"],
-                full_name,
-                phone,
-                area,
-                house_number,
-                meter_number,
-                status,
-                now,
-                now
-            ))
+            if existing_customer:
+                customer_id = existing_customer["customer_id"]
+                flash(f"ℹ️ Mteja {full_name} tayari yupo. Tena tunaongeza meter.", "info")
+            else:
+                # ✅ Ingiza mteja mpya
+                customer_id = "CUST-" + str(uuid.uuid4())[:8]
+                cur.execute("""
+                    INSERT INTO customers 
+                    (customer_id, boss_id, full_name, phone, area, house_number, status, created_at, signup_date)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (customer_id, session["boss_id"], full_name, phone, area, house_number, status, now, now))
+                flash(f"✅ Mteja {full_name} amesajiliwa kikamilifu!", "success")
 
-            # ✅ Insert meter
+            # ✅ Ingiza meter
+            meter_id = "MTR-" + str(uuid.uuid4())[:8]
             cur.execute("""
-                INSERT INTO meters 
-                (meter_id, meter_number, customer_id, status)
+                INSERT INTO meters (meter_id, meter_number, customer_id, status)
                 VALUES (?, ?, ?, ?)
-            """, (
-                meter_id,
-                meter_number,
-                customer_id,
-                status
-            ))
+            """, (meter_id, meter_number, customer_id, status))
 
             conn.commit()
-            flash(f"✅ Mteja {full_name} na meter {meter_number} wamesajiliwa kikamilifu!", "success")
+            flash(f"✅ Meter {meter_number} imeongezwa kwa {full_name}", "success")
 
         except sqlite3.IntegrityError:
             conn.rollback()
-            flash("⚠️ Meter tayari ipo kwenye mfumo.", "warning")
-
-        except Exception:
+            flash("⚠️ Meter au mteja tayari ipo kwenye mfumo.", "warning")
+        except Exception as e:
             conn.rollback()
-            flash("❌ Kuna tatizo limetokea. Tafadhali jaribu tena.", "danger")
-
+            flash(f"❌ Tatizo limetokea: {str(e)}", "danger")
         finally:
             conn.close()
 
@@ -483,10 +497,16 @@ def read_meter():
         flash("Tafadhali ingia kwanza", "danger")
         return redirect(url_for("login"))
 
-    # Tumia session info
-    user_role = "staff" if "staff_id" in session else "boss"
-    user_id = session.get("staff_id") or session.get("boss_id")
-    boss_id = session.get("staff_boss_id") or session.get("boss_id")
+    # Amua role na user_id
+    if "staff_id" in session:
+        user_role = "staff"
+        user_id = session.get("staff_id")
+        boss_id = session.get("staff_boss_id")  # Staff anaona wateja wa boss wake
+    else:
+        user_role = "boss"
+        user_id = session.get("boss_id")
+        boss_id = user_id  # Boss anaona wateja wake wote
+
     bill = None
 
     if request.method == "POST":
@@ -571,6 +591,9 @@ def read_meter():
         flash(f"✅ Meter {meter_number} imesomwa kwa {meter['full_name']}", "success")
 
     return render_template("read_meter.html", bill=bill)
+
+
+
 @app.route("/boss/meters")
 def boss_meters():
     # Hakikisha boss ameingia
@@ -594,16 +617,58 @@ def boss_meters():
         ORDER BY c.full_name
     """, (boss_id,))
 
-    customers_meters = cur.fetchall()
+    customers = cur.fetchall()
     conn.close()
 
-    # Weka data kwenye template ya boss_dashboard.html
-    return render_template("boss_meters.html", customers=customers_meters)    
-
-    return render_template("boss_customers.html", customers=customers)
-    
+    # Tuma data kwenye template
+    return render_template("boss_meters.html", customers=customers, boss={"full_name": session.get("boss_name", "Boss")})
 
     
+import uuid
+
+@app.route("/boss_add_meter/<customer_id>", methods=["GET", "POST"])
+def boss_add_meter(customer_id):
+    if "boss_id" not in session:
+        flash("Tafadhali ingia kwanza", "danger")
+        return redirect(url_for("boss_login"))
+
+    boss_id = session["boss_id"]
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Pata info ya mteja
+    cur.execute("SELECT * FROM customers WHERE customer_id=? AND boss_id=?", (customer_id, boss_id))
+    customer = cur.fetchone()
+    if not customer:
+        flash("Mteja haipo au sio wako.", "danger")
+        conn.close()
+        return redirect(url_for("boss_view_customers"))
+
+    if request.method == "POST":
+        meter_number = request.form.get("meter_number")
+        if not meter_number:
+            flash("Tafadhali andika namba ya meter", "danger")
+        else:
+            # Angalia kama meter tayari ipo
+            cur.execute("SELECT * FROM meters WHERE meter_number=?", (meter_number,))
+            existing = cur.fetchone()
+            if existing:
+                flash(f"Meter {meter_number} tayari ipo", "warning")
+            else:
+                meter_id = "MTR-" + str(uuid.uuid4())[:8]
+                cur.execute("""
+                    INSERT INTO meters (meter_id, meter_number, customer_id, status)
+                    VALUES (?, ?, ?, ?)
+                """, (meter_id, meter_number, customer["customer_id"], "ACTIVE"))
+                conn.commit()
+                flash(f"✅ Meter {meter_number} imeongezwa kwa {customer['full_name']}", "success")
+
+    # Pata meters zote za mteja
+    cur.execute("SELECT * FROM meters WHERE customer_id=?", (customer["customer_id"],))
+    meters = cur.fetchall()
+    conn.close()
+
+    return render_template("boss_add_meter.html", customer=customer, meters=meters)
 @app.route("/boss/tariff", methods=["GET", "POST"])
 def boss_tariff():
     if "boss_id" not in session:
@@ -742,16 +807,22 @@ def unread_meters():
     )
    
 
-
 @app.route("/unpaid_bills")
 def unpaid_bills():
-    # Hakikisha user ameloga
+    """
+    Route ya kuonyesha bills zisizolipwa.
+    Inashughulikia:
+    - Boss: anaona bills za wateja wake
+    - Staff: anaona bills za wateja wa boss wake pekee
+    - Superadmin: anaona zote
+    """
+    # ======== Hakikisha user ameloga ========
     if "boss_id" in session:
         user_role = "boss"
-        boss_id = session["boss_id"]
+        boss_id = session.get("boss_id")
     elif "staff_id" in session:
         user_role = "staff"
-        boss_id = session.get("boss_id")  # staff_id pia ina boss_id kwenye session
+        boss_id = session.get("staff_boss_id")  # Hii ndio sahihi
     elif "superadmin_id" in session:
         user_role = "superadmin"
         boss_id = None
@@ -759,11 +830,16 @@ def unpaid_bills():
         flash("Tafadhali ingia kwanza", "danger")
         return redirect(url_for("login"))  # login route yako ya default
 
-    # Unganisha DB
+    # ======== Debug prints ========
+    print("DEBUG: user_role =", user_role)
+    print("DEBUG: boss_id =", boss_id)
+    print("DEBUG: session =", dict(session))
+
+    # ======== Unganisha DB ========
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
 
-    # Pata bills zisizolipwa, boss pekee (au zote kwa superadmin)
+    # ======== Pata bills zisizolipwa ========
     if user_role == "superadmin":
         bills = conn.execute("""
             SELECT b.*, c.full_name AS customer_name, m.meter_number
@@ -785,6 +861,12 @@ def unpaid_bills():
 
     conn.close()
 
+    # ======== Debug prints ========
+    print("DEBUG: bills fetched =", len(bills))
+    for b in bills:
+        print(f"DEBUG: bill_id={b['bill_id']}, customer={b['customer_name']}, amount={b['amount']}")
+
+    # ======== Return template ========
     return render_template("unpaid_bills.html", unpaid_bills=bills, user_role=user_role)
                                
 @app.route("/boss/customers")
@@ -910,20 +992,22 @@ def receive_payment(bill_id):
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    # Hakikisha ameloga
+    # 1️⃣ Hakikisha ameloga
     if "staff_id" not in session and "boss_id" not in session:
         flash("Tafadhali login kwanza", "danger")
         return redirect(url_for("login"))
 
-    # Amua user role
+    # 2️⃣ Amua role na user_id
     if "staff_id" in session:
+        user_role = "staff"
         user_id = session["staff_id"]
-        user_role = session.get("staff_role")  # cashier
+        boss_id_for_record = session.get("staff_boss_id")  # boss sahihi kwa staff
     else:
-        user_id = session["boss_id"]
         user_role = "boss"
+        user_id = session["boss_id"]
+        boss_id_for_record = user_id  # kwa boss, boss_id = user_id
 
-    # Pata bill info
+    # 3️⃣ Pata bill info
     bill = cursor.execute("""
         SELECT b.*, c.full_name AS customer_name, c.customer_id,
                m.meter_number
@@ -936,8 +1020,13 @@ def receive_payment(bill_id):
     if not bill:
         conn.close()
         flash("Bili haipo", "danger")
-        return redirect(url_for("unpaid_bills"))
+        # Mrudishe kulingana na role
+        if user_role == "staff":
+            return redirect(url_for("staff_dashboard"))
+        else:
+            return redirect(url_for("boss_dashboard"))
 
+    # 4️⃣ POST: process payment
     if request.method == "POST":
         payment_id = "PAY-" + uuid.uuid4().hex[:8]
         receipt_id = "RCPID-" + uuid.uuid4().hex[:8]
@@ -947,54 +1036,76 @@ def receive_payment(bill_id):
         count = cursor.execute("SELECT COUNT(*) FROM receipts").fetchone()[0] + 1
         receipt_number = f"RCP-{year}-{str(count).zfill(5)}"
 
-        # Insert payment
+        # ✅ Insert payment
         cursor.execute("""
             INSERT INTO payments
             (payment_id, bill_id, customer_id, boss_id, amount_paid, payment_method, reference, paid_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            payment_id, bill["bill_id"], bill["customer_id"],
-            user_id, bill["amount"], "CASH", None,
+            payment_id,
+            bill["bill_id"],
+            bill["customer_id"],
+            boss_id_for_record,
+            bill["amount"],
+            "CASH",
+            None,
             datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         ))
 
-        # Update bill status
+        # ✅ Update bill status
         cursor.execute("""
             UPDATE bills
             SET status='PAID', payment_method='CASH', payment_date=?
             WHERE bill_id=?
         """, (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), bill_id))
 
-        # Insert receipt
+        # ✅ Insert receipt
         cursor.execute("""
             INSERT INTO receipts
             (receipt_id, payment_id, receipt_number, customer_id, boss_id, amount, issued_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (
-            receipt_id, payment_id, receipt_number,
-            bill["customer_id"], user_id, bill["amount"],
+            receipt_id,
+            payment_id,
+            receipt_number,
+            bill["customer_id"],
+            boss_id_for_record,
+            bill["amount"],
             datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         ))
 
         conn.commit()
         conn.close()
+
         flash("Malipo yamepokelewa na risiti imetengenezwa!", "success")
         return redirect(url_for("view_receipt", receipt_id=receipt_id))
 
+    # 5️⃣ GET: show confirmation page
     conn.close()
-    # GET request: show confirmation page
     return render_template("confirm_payment.html", bill=bill)
+    
+    
     
 @app.route("/receipt/<receipt_id>")
 def view_receipt(receipt_id):
+    # Hakikisha user ameloga
+    if "boss_id" not in session and "staff_id" not in session:
+        flash("Tafadhali login kwanza", "danger")
+        return redirect(url_for("login"))
 
-    if "boss_id" not in session:
-        return redirect(url_for("boss_login"))
+    # Amua role ya user
+    if "staff_id" in session:
+        user_role = "staff"
+        user_id = session["staff_id"]
+    else:
+        user_role = "boss"
+        user_id = session["boss_id"]
 
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
+    # Pata risiti
     receipt = cursor.execute("""
         SELECT r.*, c.full_name, c.phone
         FROM receipts r
@@ -1006,10 +1117,16 @@ def view_receipt(receipt_id):
 
     if not receipt:
         flash("Risiti haipo", "danger")
-        return redirect(url_for("boss_dashboard"))
+        # Rudisha kulingana na role
+        if user_role == "staff":
+            return redirect(url_for("staff_dashboard"))
+        else:
+            return redirect(url_for("boss_dashboard"))
 
-    return render_template("receipt.html", receipt=receipt)
-    
+    # Onyesha template ya risiti, tuma role
+    return render_template("receipt.html", receipt=receipt, user_role=user_role)
+
+    return render_template("receipt.html", receipt=receipt)    
 @app.route("/boss/add_staff", methods=["GET", "POST"])
 def add_staff():
     if "boss_id" not in session:
@@ -1101,25 +1218,24 @@ def toggle_staff(staff_id):
 # ================= STAFF LOGIN =====================
 @app.route("/staff/login", methods=["GET", "POST"])
 def staff_login():
-    # Kama POST request (mtu ana-submit login form)
     if request.method == "POST":
         username = request.form.get("username")
         password = request.form.get("password")
 
         conn = get_db_connection()
-
-        # Pata info ya staff kutoka database
         staff = conn.execute("SELECT * FROM staff WHERE username=?", (username,)).fetchone()
         conn.close()
 
-        # Hakikisha staff ipo na password iko sahihi
         if staff and check_password_hash(staff["password"], password):
             # Angalia status
             if staff["status"] != "ACTIVE":
                 flash("Account yako imefungwa. Wasiliana na boss wako.", "danger")
                 return redirect(url_for("staff_login"))
 
-            # Weka session ili kufuatilia user
+            # ✅ Safisha session zote kwanza
+            session.clear()
+
+            # Weka session mpya
             session["staff_id"] = staff["staff_id"]
             session["staff_name"] = staff["full_name"]
             session["staff_role"] = staff["role"].lower()  # lowercase English backend-friendly
@@ -1128,10 +1244,8 @@ def staff_login():
             flash(f"Karibu {staff['full_name']}!", "success")
             return redirect(url_for("staff_dashboard"))
 
-        # Username au password sio sahihi
         flash("Username au password sio sahihi.", "danger")
 
-    # GET request: onyesha login page
     return render_template("staff_login.html")
                              
 # ================= STAFF DASHBOARD =====================
