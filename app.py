@@ -275,21 +275,24 @@ def boss_dashboard():
     # Pata info ya boss
     boss = conn.execute("SELECT * FROM boss WHERE boss_id=?", (boss_id,)).fetchone()
 
-    # Pata wateja wote na meters zao
-    customers = conn.execute("""
-        SELECT c.customer_id, c.full_name, c.phone, c.area, c.house_number,
-               m.meter_number, COALESCE(m.status,'INACTIVE') AS meter_status
-        FROM customers c
-        LEFT JOIN meters m ON c.customer_id = m.customer_id
-        WHERE c.boss_id=?
-        ORDER BY c.full_name
+    # Pata wateja wote
+    customers_raw = conn.execute("""
+        SELECT *
+        FROM customers
+        WHERE boss_id=?
+        ORDER BY full_name
     """, (boss_id,)).fetchall()
 
-    # Hesabu meters ACTIVE na INACTIVE
-    active_meters = len([c for c in customers if c['meter_status'] == 'ACTIVE'])
-    inactive_meters = len([c for c in customers if c['meter_status'] == 'INACTIVE'])
+    # Pata meters zote za wateja
+    meters_raw = conn.execute("""
+        SELECT *
+        FROM meters
+        WHERE customer_id IN (
+            SELECT customer_id FROM customers WHERE boss_id=?
+        )
+    """, (boss_id,)).fetchall()
 
-    # Pata unpaid bills kwa boss huyu
+    # Pata unpaid bills
     unpaid_bills = conn.execute("""
         SELECT b.*, c.full_name AS customer_name, m.meter_number
         FROM bills b
@@ -298,9 +301,8 @@ def boss_dashboard():
         WHERE b.status='UNPAID' AND c.boss_id=?
         ORDER BY b.billing_month DESC
     """, (boss_id,)).fetchall()
-    unpaid_count = len(unpaid_bills)
 
-    # Jumla ya pesa zisizolipwa (from bills.amount)
+    # Jumla za statistics
     total_unpaid_amount = conn.execute("""
         SELECT SUM(amount) as total
         FROM bills b
@@ -308,7 +310,6 @@ def boss_dashboard():
         WHERE b.status='UNPAID' AND c.boss_id=?
     """, (boss_id,)).fetchone()['total'] or 0
 
-    # Jumla ya payments zilizolipwa (from payments.amount_paid)
     total_payments = conn.execute("""
         SELECT SUM(amount_paid) as total
         FROM payments p
@@ -318,6 +319,28 @@ def boss_dashboard():
 
     conn.close()
 
+    # Fanya dictionary ya wateja na list ya meters zao
+    customers = []
+    meters_map = {}
+    for m in meters_raw:
+        meters_map.setdefault(m['customer_id'], []).append({
+            'meter_number': m['meter_number'],
+            'status': m['status']
+        })
+
+    for c in customers_raw:
+        c_dict = dict(c)
+        c_dict['meters'] = meters_map.get(c['customer_id'], [])
+        customers.append(c_dict)
+
+    # Hesabu meters active na inactive
+    active_meters = sum(
+        1 for mlist in meters_map.values() for m in mlist if m['status'] == 'ACTIVE'
+    )
+    inactive_meters = sum(
+        1 for mlist in meters_map.values() for m in mlist if m['status'] == 'INACTIVE'
+    )
+
     return render_template(
         "boss_dashboard.html",
         boss=boss,
@@ -325,7 +348,6 @@ def boss_dashboard():
         active_meters=active_meters,
         inactive_meters=inactive_meters,
         unpaid_bills=unpaid_bills,
-        unpaid_count=unpaid_count,
         total_unpaid_amount=total_unpaid_amount,
         total_payments=total_payments
     )

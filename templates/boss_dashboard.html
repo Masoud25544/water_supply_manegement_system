@@ -187,7 +187,7 @@
                     <th>Phone</th>
                     <th>Area</th>
                     <th>House</th>
-                    <th>Meter</th>
+                    <th>Meters</th>
                     <th>Status</th>
                     <th>Action</th>
                 </tr>
@@ -201,26 +201,36 @@
                     <td>{{ m.phone or "Hakuna" }}</td>
                     <td>{{ m.area or "Hakuna" }}</td>
                     <td>{{ m.house_number or "Hakuna" }}</td>
-                    <td>{{ m.meter_number or "Hakuna" }}</td>
                     <td>
-                        {% if m.meter_status == 'ACTIVE' %}
-                            <span class="badge bg-success">ACTIVE</span>
+                        {% if m.meters %}
+                            {% for meter in m.meters %}
+                                {{ meter.meter_number }}<br>
+                            {% endfor %}
+                        {% else %}
+                            Hakuna
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if m.meters %}
+                            {% for meter in m.meters %}
+                                {% if meter.status == 'ACTIVE' %}
+                                    <span class="badge bg-success">ACTIVE</span><br>
+                                {% else %}
+                                    <span class="badge bg-secondary">INACTIVE</span><br>
+                                {% endif %}
+                            {% endfor %}
                         {% else %}
                             <span class="badge bg-secondary">INACTIVE</span>
                         {% endif %}
                     </td>
                     <td>
-                        {% if m.meter_number %}
-                            <a href="{{ url_for('edit_customer', customer_id=m.customer_id) }}" class="btn btn-sm btn-info mb-1">Edit</a>
-                            <a href="{{ url_for('delete_customer', customer_id=m.customer_id) }}" class="btn btn-sm btn-danger mb-1">Delete</a>
-                            {% for bill in unpaid_bills %}
-                                {% if bill.customer_id == m.customer_id %}
-                                    <a href="{{ url_for('receive_payment', bill_id=bill.bill_id) }}" class="btn btn-sm btn-success mb-1">Pokea Malipo</a>
-                                {% endif %}
-                            {% endfor %}
-                        {% else %}
-                            <span class="text-muted">Hakuna kitendo</span>
-                        {% endif %}
+                        <a href="{{ url_for('edit_customer', customer_id=m.customer_id) }}" class="btn btn-sm btn-info mb-1">Edit</a>
+                        <a href="{{ url_for('delete_customer', customer_id=m.customer_id) }}" class="btn btn-sm btn-danger mb-1">Delete</a>
+                        {% for bill in unpaid_bills %}
+                            {% if bill.customer_id == m.customer_id %}
+                                <a href="{{ url_for('receive_payment', bill_id=bill.bill_id) }}" class="btn btn-sm btn-success mb-1">Pokea Malipo</a>
+                            {% endif %}
+                        {% endfor %}
                     </td>
                 </tr>
                 {% endfor %}
