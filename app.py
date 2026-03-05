@@ -1416,8 +1416,156 @@ def staff_view_customers():
         staff_role=staff_role,
         staff_id=staff_id,
         customers=customers
-    )                      
-      
+    )
+    
+@app.route("/boss/monthly_report")
+def boss_monthly_report():
+    if "boss_id" not in session:
+        flash("Tafadhali ingia kwanza", "danger")
+        return redirect(url_for("boss_login"))
+
+    boss_id = session["boss_id"]
+    month = request.args.get("month")
+
+    if not month:
+        flash("Chagua mwezi!", "warning")
+        return redirect(url_for("boss_dashboard"))
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Chukua bills zote za mwezi huo
+    cur.execute("""
+        SELECT b.bill_id,
+               b.customer_id,
+               c.full_name AS customer_name,
+               b.meter_id,
+               b.units_used,
+               b.amount,
+               b.status,
+               b.billing_month,
+               b.payment_method,
+               b.payment_date
+        FROM bills b
+        JOIN customers c ON b.customer_id = c.customer_id
+        WHERE c.boss_id = ? AND b.billing_month = ?
+        ORDER BY b.bill_id DESC
+    """, (boss_id, month))
+
+    bills = cur.fetchall()
+
+    # Totals
+    total_units = sum(b["units_used"] for b in bills)
+    total_amount = sum(b["amount"] for b in bills)
+
+    # Count Paid / Unpaid correctly
+    paid_count = sum(1 for b in bills if b["status"].upper() == "PAID")
+    unpaid_count = sum(1 for b in bills if b["status"].upper() == "UNPAID")
+
+    # Optional: totals for paid bills only
+    total_paid_units = sum(b["units_used"] for b in bills if b["status"].upper() == "PAID")
+    total_paid_amount = sum(b["amount"] for b in bills if b["status"].upper() == "PAID")
+
+    conn.close()
+
+    return render_template(
+        "boss_monthly_report.html",
+        bills=bills,
+        month=month,
+        total_units=total_units,
+        total_amount=total_amount,
+        paid_count=paid_count,
+        unpaid_count=unpaid_count,
+        total_paid_units=total_paid_units,
+        total_paid_amount=total_paid_amount
+    )
+    
+@app.route("/search_customer", methods=["GET","POST"])
+def search_customer():
+
+    if request.method == "POST":
+
+        name = request.form.get("customer_name","").strip()
+
+        if name == "":
+            flash("Andika jina la mteja kwanza","warning")
+            return redirect(url_for("search_customer"))
+
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+
+        cur.execute("""
+        SELECT * FROM customers
+        WHERE full_name LIKE ?
+        """,(f"%{name}%",))
+
+        customer = cur.fetchone()
+
+        conn.close()
+
+        if customer:
+            return redirect(url_for(
+                "customer_details",
+                customer_id=customer["customer_id"]
+            ))
+        else:
+            flash("Mteja hajapatikana","danger")
+
+    return render_template("search_customer.html")
+    
+        
+                
+@app.route("/customer_details/<customer_id>")
+def customer_details(customer_id):
+
+    if "boss_id" not in session:
+        flash("Tafadhali ingia kwanza", "danger")
+        return redirect(url_for("boss_login"))
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+
+    # pata taarifa za mteja
+    cur.execute("""
+        SELECT * FROM customers
+        WHERE customer_id = ?
+    """, (customer_id,))
+    customer = cur.fetchone()
+
+    # pata meters za mteja
+    cur.execute("""
+        SELECT meter_id, meter_number, status
+        FROM meters
+        WHERE customer_id = ?
+    """, (customer_id,))
+    meters = cur.fetchall()
+
+    # pata bills zisizolipwa tu
+    cur.execute("""
+        SELECT 
+            b.bill_id,
+            b.amount,
+            b.units_used,
+            b.billing_month,
+            b.status,
+            m.meter_number
+        FROM bills b
+        JOIN meters m ON b.meter_id = m.meter_id
+        WHERE b.customer_id = ? AND b.status = 'UNPAID'
+        ORDER BY b.billing_month DESC
+    """, (customer_id,))
+    bills = cur.fetchall()
+
+    conn.close()
+
+    return render_template(
+        "customer_details.html",
+        customer=customer,
+        meters=meters,
+        bills=bills
+    )
 # ================= RUN APP ==================
 if __name__ == "__main__":
     app.run(debug=True)

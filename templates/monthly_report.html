@@ -1,0 +1,39 @@
+<h4>📊 Monthly Report - {{ month }}</h4>
+
+<div class="mb-3">
+    <b>Total Units:</b> {{ total_units }} <br>
+    <b>Total Amount:</b> {{ total_amount }} TZS
+</div>
+
+<table class="table table-bordered table-striped">
+    <thead class="table-dark">
+        <tr>
+            <th>#</th>
+            <th>Customer</th>
+            <th>Meter</th>
+            <th>Units</th>
+            <th>Amount</th>
+            <th>Status</th>
+            <th>Payment Method</th>
+            <th>Payment Date</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for b in bills %}
+        <tr>
+            <td>{{ loop.index }}</td>
+            <td>{{ b.customer_name }}</td>
+            <td>{{ b.meter_id }}</td>
+            <td>{{ b.units_used }}</td>
+            <td>{{ b.amount }}</td>
+            <td>{{ b.status }}</td>
+            <td>{{ b.payment_method }}</td>
+            <td>{{ b.payment_date }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<button onclick="window.print()" class="btn btn-primary">
+🖨 Print Report
+</button>

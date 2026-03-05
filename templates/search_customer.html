@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Tafuta Mteja</title>
+
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+
+<style>
+body{
+    background:#f4f6f9;
+}
+.search-card{
+    max-width:700px;
+    margin:auto;
+    margin-top:80px;
+    padding:30px;
+    border-radius:10px;
+    box-shadow:0 3px 10px rgba(0,0,0,0.1);
+    background:white;
+}
+</style>
+
+</head>
+<body>
+
+<div class="container">
+
+<div class="search-card">
+
+<h3 class="mb-4 text-center">🔎 Tafuta Mteja</h3>
+
+<form method="POST">
+
+<div class="input-group mb-3">
+
+<input
+type="text"
+name="customer_name"
+class="form-control"
+placeholder="Andika jina la mteja..."
+required
+>
+
+<button class="btn btn-primary">
+Tafuta
+</button>
+
+</div>
+
+</form>
+
+<a href="{{ url_for('boss_dashboard') }}" class="btn btn-secondary btn-sm">
+⬅ Rudi Dashboard
+</a>
+
+</div>
+
+</div>
+
+</body>
+</html>
