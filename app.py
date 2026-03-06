@@ -16,6 +16,10 @@ DB_PATH = "water_supply.db"
 from functools import wraps
 from flask import session, flash, redirect, url_for
 
+
+    
+
+
 # ====================== MAKE SESSION TEMPORARY ======================
 @app.before_request
 def make_session_temporary():
@@ -61,6 +65,7 @@ def role_required(*allowed_roles):
             
         return decorated_function
     return decorator
+    
 
 # ================= DATABASE CONNECTION ==================
 def get_db_connection():
@@ -1566,6 +1571,12 @@ def customer_details(customer_id):
         meters=meters,
         bills=bills
     )
+    
+@app.route("/")
+def index():
+    # Rudisha user kwa login page
+    return redirect(url_for("boss_login"))
+    # au kwa superadmin: return redirect(url_for("superadmin_login"))    
 # ================= RUN APP ==================
 if __name__ == "__main__":
     app.run(debug=True)
