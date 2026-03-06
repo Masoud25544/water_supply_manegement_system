@@ -18,7 +18,12 @@ from flask import session, flash, redirect, url_for
 
 
     
+import traceback
 
+@app.errorhandler(500)
+def internal_error(e):
+    tb = traceback.format_exc()
+    return f"<h3>Internal Server Error</h3><pre>{tb}</pre>", 500
 
 # ====================== MAKE SESSION TEMPORARY ======================
 @app.before_request
