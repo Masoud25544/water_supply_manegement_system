@@ -3,63 +3,208 @@
 <head>
 <meta charset="UTF-8">
 <title>Pokea Malipo</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+
 <style>
-body { background-color: #f0f2f5; font-family: Arial, sans-serif; }
-.card { border-radius: 12px; }
-.back { margin-top: 20px; text-align: center; }
+
+body{
+background: linear-gradient(135deg,#0f2027,#203a43,#2c5364);
+font-family: 'Segoe UI', sans-serif;
+min-height:100vh;
+}
+
+.payment-card{
+max-width:650px;
+margin:auto;
+margin-top:60px;
+border-radius:15px;
+overflow:hidden;
+box-shadow:0 12px 35px rgba(0,0,0,0.35);
+}
+
+/* Header */
+.card-header-custom{
+background: linear-gradient(90deg,#007bff,#00c6ff);
+color:white;
+padding:20px;
+text-align:center;
+}
+
+/* Body */
+.card-body-custom{
+background:white;
+padding:35px;
+}
+
+.bill-box{
+background:#f5f9ff;
+border-radius:10px;
+padding:15px;
+margin-bottom:25px;
+border-left:5px solid #0d6efd;
+}
+
+.form-control, .form-select{
+height:48px;
+border-radius:8px;
+}
+
+.btn-pay{
+background: linear-gradient(90deg,#198754,#20c997);
+border:none;
+height:48px;
+font-weight:500;
+border-radius:8px;
+}
+
+.btn-pay:hover{
+background: linear-gradient(90deg,#157347,#1aa179);
+}
+
+.back{
+margin-top:25px;
+text-align:center;
+}
+
 </style>
 </head>
 
 <body>
 
-<div class="container mt-5">
-    <div class="card shadow-lg p-4">
-        <h3 class="mb-4 text-primary">Pokea Malipo ya Bill</h3>
+<div class="container">
 
-        <!-- Bill Info -->
-        <p><strong>Jina la Mteja:</strong> {{ bill.customer_name }}</p>
-        <p><strong>Kiasi cha Bill:</strong> {{ "{:,.2f}".format(bill.amount) }} TZS</p>
-        <p><strong>Status:</strong> {{ bill.status }}</p>
+<div class="payment-card">
 
-        <!-- Malipo Form -->
-        <form method="POST">
-            <div class="mb-3">
-                <label>Kiasi Kilicholipwa</label>
-                <input type="number" step="0.01" name="amount_paid" class="form-control" required>
-            </div>
+<div class="card-header-custom">
 
-            <div class="mb-3">
-                <label>Njia ya Malipo</label>
-                <select name="payment_method" class="form-control" required>
-                    <option value="Cash">Cash</option>
-                    <option value="M-Pesa">M-Pesa</option>
-                    <option value="Tigo Pesa">Tigo Pesa</option>
-                    <option value="Airtel Money">Airtel Money</option>
-                    <option value="Bank">Bank</option>
-                </select>
-            </div>
+<h4 class="m-0">
+<i class="bi bi-cash-coin"></i>
+Pokea Malipo ya Bill
+</h4>
 
-            <div class="mb-3">
-                <label>Reference (optional)</label>
-                <input type="text" name="reference" class="form-control">
-            </div>
+</div>
 
-            <button type="submit" class="btn btn-success w-100">Thibitisha Malipo</button>
-        </form>
+<div class="card-body-custom">
 
-        <!-- 🔹 Back to Dashboard (ROLE-AWARE) -->
-        <div class="back">
-            {% if user_role == "boss" %}
-                <a href="{{ url_for('boss_dashboard') }}" class="btn btn-secondary">🔙 Rudi Dashboard</a>
-            {% else %}
-                <a href="{{ url_for('staff_dashboard') }}" class="btn btn-secondary">🔙 Rudi Dashboard</a>
-            {% endif %}
-        </div>
+<!-- Bill Info -->
 
-    </div>
+<div class="bill-box">
+
+<p class="mb-1">
+<strong><i class="bi bi-person"></i> Jina la Mteja:</strong>
+{{ bill.customer_name }}
+</p>
+
+<p class="mb-1">
+<strong><i class="bi bi-receipt"></i> Kiasi cha Bill:</strong>
+<span class="text-danger fw-bold">
+{{ "{:,.2f}".format(bill.amount) }} TZS
+</span>
+</p>
+
+<p class="mb-0">
+<strong><i class="bi bi-info-circle"></i> Status:</strong>
+
+{% if bill.status == "PAID" %}
+
+<span class="badge bg-success">PAID</span>
+
+{% else %}
+
+<span class="badge bg-danger">{{ bill.status }}</span>
+
+{% endif %}
+
+</p>
+
+</div>
+
+<!-- Payment Form -->
+
+<form method="POST">
+
+<div class="mb-3">
+
+<label class="form-label">
+<i class="bi bi-cash"></i> Kiasi Kilicholipwa
+</label>
+
+<input
+type="number"
+step="0.01"
+name="amount_paid"
+class="form-control"
+required
+>
+
+</div>
+
+<div class="mb-3">
+
+<label class="form-label">
+<i class="bi bi-credit-card"></i> Njia ya Malipo
+</label>
+
+<select name="payment_method" class="form-select" required>
+
+<option value="Cash">Cash</option>
+<option value="M-Pesa">M-Pesa</option>
+<option value="Tigo Pesa">Tigo Pesa</option>
+<option value="Airtel Money">Airtel Money</option>
+<option value="Bank">Bank</option>
+
+</select>
+
+</div>
+
+<div class="mb-3">
+
+<label class="form-label">
+<i class="bi bi-hash"></i> Reference (optional)
+</label>
+
+<input type="text" name="reference" class="form-control">
+
+</div>
+
+<button type="submit" class="btn btn-pay w-100">
+<i class="bi bi-check-circle"></i>
+Thibitisha Malipo
+</button>
+
+</form>
+
+<!-- Back Button -->
+
+<div class="back">
+
+{% if user_role == "boss" %}
+
+<a href="{{ url_for('boss_dashboard') }}" class="btn btn-dark">
+<i class="bi bi-arrow-left"></i> Rudi Dashboard
+</a>
+
+{% else %}
+
+<a href="{{ url_for('staff_dashboard') }}" class="btn btn-dark">
+<i class="bi bi-arrow-left"></i> Rudi Dashboard
+</a>
+
+{% endif %}
+
+</div>
+
+</div>
+
+</div>
+
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
 </body>
 </html>

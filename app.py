@@ -242,27 +242,30 @@ def boss_login():
         boss = cur.fetchone()
 
         if boss and check_password_hash(boss["password"], password):
+
             # 1️⃣ Check trial
             now = datetime.now()
             trial_end = datetime.strptime(boss["trial_end_date"], "%Y-%m-%d %H:%M:%S")
+
             if now > trial_end:
-                cur.execute("UPDATE boss SET status=? WHERE boss_id=?", ("INACTIVE", boss["boss_id"]))
+                cur.execute(
+                    "UPDATE boss SET status=? WHERE boss_id=?",
+                    ("INACTIVE", boss["boss_id"])
+                )
                 conn.commit()
-                conn.close()
-                flash("Trial imeisha. Account yako ni INACTIVE. Wasiliana na admin.", "danger")
-                return redirect(url_for("boss_login"))
 
-            # 2️⃣ Check status
-            if boss["status"] != "ACTIVE":
-                conn.close()
-                flash("Account yako ni INACTIVE. Wasiliana na admin.", "danger")
-                return redirect(url_for("boss_login"))
-
-            # 3️⃣ Login success – safisha session kwanza
-            session.clear()  # Hii ni muhimu
+            # 2️⃣ Login success (HATUMZUII)
+            session.clear()
             session["boss_id"] = boss["boss_id"]
+            session["boss_status"] = boss["status"]   # tunahifadhi status
+
             conn.close()
-            flash(f"Karibu, {boss['full_name']}!", "success")
+
+            if boss["status"] == "INACTIVE":
+                flash("Account yako ni INACTIVE. Baadhi ya huduma zimefungwa.", "warning")
+            else:
+                flash(f"Karibu, {boss['full_name']}!", "success")
+
             return redirect(url_for("boss_dashboard"))
 
         conn.close()
@@ -272,7 +275,6 @@ def boss_login():
     return render_template("boss_login.html")
     
 
-
 @app.route("/boss_dashboard")
 def boss_dashboard():
     if "boss_id" not in session:
@@ -280,43 +282,30 @@ def boss_dashboard():
         return redirect(url_for("boss_login"))
 
     boss_id = session["boss_id"]
-
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
 
     # Pata info ya boss
-    boss = conn.execute(
-        "SELECT * FROM boss WHERE boss_id=?",
-        (boss_id,)
-    ).fetchone()
+    boss = conn.execute("SELECT * FROM boss WHERE boss_id=?", (boss_id,)).fetchone()
 
-    # Pata wateja wote
+    # Pata customers na meters
     customers_raw = conn.execute("""
-        SELECT *
-        FROM customers
-        WHERE boss_id=?
-        ORDER BY full_name
+        SELECT * FROM customers WHERE boss_id=? ORDER BY full_name
     """, (boss_id,)).fetchall()
 
-    # Pata meters zote za wateja
     meters_raw = conn.execute("""
-        SELECT *
-        FROM meters
-        WHERE customer_id IN (
+        SELECT * FROM meters WHERE customer_id IN (
             SELECT customer_id FROM customers WHERE boss_id=?
         )
     """, (boss_id,)).fetchall()
 
-    # ✅ REKEBISHO LIPO HAPA (JOIN kwa meter_id badala ya customer_id)
+    # Pata unpaid bills
     unpaid_bills = conn.execute("""
-        SELECT b.*, 
-               c.full_name AS customer_name, 
-               m.meter_number
+        SELECT b.*, c.full_name AS customer_name, m.meter_number
         FROM bills b
         JOIN customers c ON b.customer_id = c.customer_id
         LEFT JOIN meters m ON b.meter_id = m.meter_id
-        WHERE b.status='UNPAID' 
-          AND c.boss_id=?
+        WHERE b.status='UNPAID' AND c.boss_id=?
         ORDER BY b.billing_month DESC
     """, (boss_id,)).fetchall()
 
@@ -325,8 +314,7 @@ def boss_dashboard():
         SELECT SUM(b.amount) as total
         FROM bills b
         JOIN customers c ON b.customer_id = c.customer_id
-        WHERE b.status='UNPAID' 
-          AND c.boss_id=?
+        WHERE b.status='UNPAID' AND c.boss_id=?
     """, (boss_id,)).fetchone()['total'] or 0
 
     # Jumla ya malipo yote
@@ -339,30 +327,26 @@ def boss_dashboard():
 
     conn.close()
 
-    # Tengeneza dictionary ya wateja na meters zao
-    customers = []
+    # Tengeneza meters map
     meters_map = {}
-
     for m in meters_raw:
         meters_map.setdefault(m['customer_id'], []).append({
             'meter_number': m['meter_number'],
             'status': m['status']
         })
 
+    customers = []
     for c in customers_raw:
         c_dict = dict(c)
         c_dict['meters'] = meters_map.get(c['customer_id'], [])
         customers.append(c_dict)
 
-    # Hesabu meters active na inactive
+    # Hesabu meters active/inactive
     active_meters = sum(
-        1 for mlist in meters_map.values()
-        for m in mlist if m['status'] == 'ACTIVE'
+        1 for mlist in meters_map.values() for m in mlist if m['status']=='ACTIVE'
     )
-
     inactive_meters = sum(
-        1 for mlist in meters_map.values()
-        for m in mlist if m['status'] == 'INACTIVE'
+        1 for mlist in meters_map.values() for m in mlist if m['status']=='INACTIVE'
     )
 
     return render_template(
@@ -553,6 +537,17 @@ def read_meter():
         user_id = session.get("boss_id")
         boss_id = user_id  # Boss anaona wateja wake wote
 
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # 🔹 Angalia status ya boss kutoka table halisi 'boss'
+    cur.execute("SELECT status FROM boss WHERE boss_id=?", (boss_id,))
+    boss_row = cur.fetchone()
+    if not boss_row or boss_row["status"] != "ACTIVE":
+        flash("⚠️ Boss huyu ni INACTIVE, hauwezi kusoma meters", "warning")
+        conn.close()
+        return render_template("read_meter.html", bill=None)
+
     bill = None
 
     if request.method == "POST":
@@ -563,9 +558,6 @@ def read_meter():
         if not meter_number or not current_reading:
             flash("Tafadhali jaza meter number na reading", "danger")
             return render_template("read_meter.html", bill=None)
-
-        conn = get_db_connection()
-        cur = conn.cursor()
 
         # Angalia meter ipo, ni ya wateja wa boss/staff, na ACTIVE
         cur.execute("""
@@ -643,7 +635,6 @@ def read_meter():
         flash(f"✅ Meter {meter_number} imesomwa kwa {meter['full_name']}", "success")
 
     return render_template("read_meter.html", bill=bill)
-
 
 @app.route("/boss/meters")
 def boss_meters():
