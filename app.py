@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import uuid
 import random
 import string
+import re
 
 def generate_staff_id():
     return "STF-" + str(uuid.uuid4())[:8]
@@ -520,6 +521,7 @@ def delete_customer(customer_id):
     return redirect(url_for("boss_dashboard"))
     
 # ================= READ METER =====================
+
 @app.route("/read_meter", methods=["GET", "POST"])
 def read_meter():
     # Hakikisha staff au boss ameloga
@@ -531,16 +533,16 @@ def read_meter():
     if "staff_id" in session:
         user_role = "staff"
         user_id = session.get("staff_id")
-        boss_id = session.get("staff_boss_id")  # Staff anaona wateja wa boss wake
+        boss_id = session.get("staff_boss_id")
     else:
         user_role = "boss"
         user_id = session.get("boss_id")
-        boss_id = user_id  # Boss anaona wateja wake wote
+        boss_id = user_id
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # 🔹 Angalia status ya boss kutoka table halisi 'boss'
+    # 🔹 Angalia status ya boss
     cur.execute("SELECT status FROM boss WHERE boss_id=?", (boss_id,))
     boss_row = cur.fetchone()
     if not boss_row or boss_row["status"] != "ACTIVE":
@@ -554,9 +556,20 @@ def read_meter():
         meter_number = request.form.get("meter_number")
         current_reading = request.form.get("current_reading")
 
-        # Hakikisha fields zimejazwa
         if not meter_number or not current_reading:
             flash("Tafadhali jaza meter number na reading", "danger")
+            return render_template("read_meter.html", bill=None)
+
+        # 🔹 Ultra-safe input validation
+        # Lazima iwe namba kamili au decimal positive, si .2 au -45 au alama
+        if not re.match(r'^[0-9]+(\.[0-9]+)?$', current_reading):
+            flash("⚠️ Units lazima ziwe namba halisi positive, si alama zisizo halisi", "danger")
+            return render_template("read_meter.html", bill=None)
+
+        units_used = float(current_reading)
+
+        if units_used <= 0 or units_used > 10000:  # Adjust max limit
+            flash("⚠️ Units lazima ziwe positive na ziko ndani ya range sahihi", "danger")
             return render_template("read_meter.html", bill=None)
 
         # Angalia meter ipo, ni ya wateja wa boss/staff, na ACTIVE
@@ -573,7 +586,6 @@ def read_meter():
             conn.close()
             return render_template("read_meter.html", bill=None)
 
-        # Check meter status
         if meter["meter_status"] != "ACTIVE":
             flash("⚠️ Meter hii imezimwa (INACTIVE), haiwezi kusomwa", "warning")
             conn.close()
@@ -600,7 +612,6 @@ def read_meter():
         price_per_unit = tariff["price_per_unit"] if tariff else 0
 
         # Hesabu amount
-        units_used = float(current_reading)
         amount = units_used * price_per_unit
 
         bill_id = "BILL-" + str(uuid.uuid4())[:8]
@@ -1419,6 +1430,7 @@ def staff_view_customers():
         customers=customers
     )
     
+    
 @app.route("/boss/monthly_report")
 def boss_monthly_report():
     if "boss_id" not in session:
@@ -1480,7 +1492,6 @@ def boss_monthly_report():
         total_paid_units=total_paid_units,
         total_paid_amount=total_paid_amount
     )
-    
 @app.route("/search_customer", methods=["GET","POST"])
 def search_customer():
 
