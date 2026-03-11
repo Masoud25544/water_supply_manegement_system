@@ -129,7 +129,9 @@
                             {% endif %}
 
                             <a href="{{ url_for('edit_customer', customer_id=c.customer_id) }}" class="btn btn-sm btn-info text-white">Edit</a>
-                            <a href="{{ url_for('delete_customer', customer_id=c.customer_id) }}" class="btn btn-sm btn-danger" onclick="return confirm('Una uhakika unataka kufuta mteja huyu?')">Delete</a>
+
+                            <!-- Delete sasa inapeleka kwenye template ya kuthibitisha -->
+                            <a href="{{ url_for('confirm_delete_customer', customer_id=c.customer_id) }}" class="btn btn-sm btn-danger">Delete</a>
                         </td>
                     </tr>
                 {% else %}
