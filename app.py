@@ -1,4 +1,3 @@
-
 from flask import Flask, render_template, request, redirect, url_for, flash, session
 from werkzeug.security import generate_password_hash, check_password_hash
 import sqlite3
@@ -91,12 +90,97 @@ def init_db():
     )
     """)
 
-    # 🔹 Meza zingine kama meters, bills, payments, receipts unaweza kuongeza hapa
-    
+    # =====================================================
+    # METERS TABLE
+    # =====================================================
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS meters (
+        meter_id TEXT PRIMARY KEY,
+        meter_number TEXT UNIQUE NOT NULL,
+        customer_id TEXT NOT NULL,
+        status TEXT DEFAULT 'ACTIVE',
+        FOREIGN KEY (customer_id) REFERENCES customers(customer_id) ON DELETE CASCADE
+    )
+    """)
+
+    # =====================================================
+    # TARIFFS TABLE
+    # =====================================================
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS tariffs (
+        tariff_id TEXT PRIMARY KEY,
+        boss_id TEXT NOT NULL,
+        price_per_unit REAL NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (boss_id) REFERENCES boss(boss_id) ON DELETE CASCADE
+    )
+    """)
+
+    # =====================================================
+    # METER READINGS
+    # =====================================================
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS meter_readings (
+        reading_id TEXT PRIMARY KEY,
+        meter_id TEXT NOT NULL,
+        reading_value REAL NOT NULL,
+        reading_date TEXT NOT NULL,
+        recorded_by TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (meter_id) REFERENCES meters(meter_id) ON DELETE CASCADE
+    )
+    """)
+
+    # =====================================================
+    # BILLS
+    # =====================================================
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS bills (
+        bill_id TEXT PRIMARY KEY,
+        customer_id TEXT NOT NULL,
+        meter_id TEXT NOT NULL,
+        previous_reading REAL,
+        current_reading REAL,
+        units_used REAL,
+        amount REAL,
+        bill_month TEXT,
+        status TEXT DEFAULT 'UNPAID',
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (customer_id) REFERENCES customers(customer_id) ON DELETE CASCADE
+    )
+    """)
+
+    # =====================================================
+    # PAYMENTS
+    # =====================================================
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS payments (
+        payment_id TEXT PRIMARY KEY,
+        bill_id TEXT NOT NULL,
+        amount_paid REAL NOT NULL,
+        payment_method TEXT,
+        payment_date TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (bill_id) REFERENCES bills(bill_id) ON DELETE CASCADE
+    )
+    """)
+
+    # =====================================================
+    # RECEIPTS
+    # =====================================================
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS receipts (
+        receipt_id TEXT PRIMARY KEY,
+        payment_id TEXT NOT NULL,
+        receipt_number TEXT UNIQUE,
+        issued_date TEXT NOT NULL,
+        FOREIGN KEY (payment_id) REFERENCES payments(payment_id) ON DELETE CASCADE
+    )
+    """)
+
     conn.commit()
     conn.close()
     print("✅ Database setup complete.")
-
 # ================================
 # INIT DATABASE ROUTE (kwa testing)
 # ================================
