@@ -10,3 +10,7 @@ water_supply.db
 .env
 *.vscode/
 *.DS_Store
+appp_yangu.py
+dj.py
+*.pyc
+__pycache__/
