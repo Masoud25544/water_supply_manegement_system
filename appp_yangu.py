@@ -1,4 +1,3 @@
-
 from flask import Flask, render_template, request, redirect, url_for, flash, session
 from werkzeug.security import generate_password_hash, check_password_hash
 import sqlite3
@@ -7,8 +6,6 @@ import uuid
 import random
 import string
 import re
-from functools import wraps
-import traceback
 
 def generate_staff_id():
     return "STF-" + str(uuid.uuid4())[:8]
@@ -17,98 +14,13 @@ app = Flask(__name__)
 app.secret_key = "supersecretkey"
 DB_PATH = "water_supply.db"
 
-# ================================
-# DATABASE SETUP FUNCTION
-# ================================
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
+from functools import wraps
+from flask import session, flash, redirect, url_for
 
-    # SUPER ADMIN
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS super_admin (
-        admin_id TEXT PRIMARY KEY,
-        username TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        created_at TEXT NOT NULL
-    )
-    """)
-    default_admin_id = "ADMIN-" + str(uuid.uuid4())
-    cur.execute("""
-    INSERT OR IGNORE INTO super_admin 
-    (admin_id, username, password, created_at)
-    VALUES (?, ?, ?, ?)
-    """, (
-        default_admin_id,
-        "admin",
-        generate_password_hash("1234"),
-        datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    ))
 
-    # BOSS
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS boss (
-        boss_id TEXT PRIMARY KEY,
-        full_name TEXT NOT NULL,
-        username TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        signup_date TEXT NOT NULL,
-        trial_end_date TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'ACTIVE',
-        created_at TEXT NOT NULL
-    )
-    """)
-
-    # STAFF
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS staff (
-        staff_id TEXT PRIMARY KEY,
-        boss_id TEXT NOT NULL,
-        full_name TEXT NOT NULL,
-        username TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        role TEXT,
-        status TEXT NOT NULL DEFAULT 'ACTIVE',
-        created_at TEXT NOT NULL,
-        FOREIGN KEY (boss_id) REFERENCES boss(boss_id) ON DELETE CASCADE
-    )
-    """)
-
-    # CUSTOMERS
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS customers (
-        customer_id TEXT PRIMARY KEY,
-        boss_id TEXT NOT NULL,
-        full_name TEXT NOT NULL,
-        phone TEXT,
-        area TEXT,
-        house_number TEXT,
-        meter_number TEXT,
-        signup_date TEXT,
-        status TEXT DEFAULT 'ACTIVE',
-        created_at TEXT NOT NULL,
-        FOREIGN KEY (boss_id) REFERENCES boss(boss_id) ON DELETE CASCADE
-    )
-    """)
-
-    # 🔹 Meza zingine kama meters, bills, payments, receipts unaweza kuongeza hapa
     
-    conn.commit()
-    conn.close()
-    print("✅ Database setup complete.")
+import traceback
 
-# ================================
-# INIT DATABASE ROUTE (kwa testing)
-# ================================
-@app.route('/init_db')
-def init_db_route():
-    try:
-        init_db()
-        return "<h3>✅ Database imeundwa kikamilifu!</h3>"
-    except Exception as e:
-        return f"<h3>❌ Tatizo limejitokeza:</h3><pre>{str(e)}</pre>"
-
-# ================= ERROR HANDLER ==================
 @app.errorhandler(500)
 def internal_error(e):
     tb = traceback.format_exc()
@@ -117,13 +29,23 @@ def internal_error(e):
 # ====================== MAKE SESSION TEMPORARY ======================
 @app.before_request
 def make_session_temporary():
+    """
+    Hii function inafanya kila session kuwa non-permanent.
+    Matokeo:
+    - Session hazibaki kwenye browser baada ya browser kufungwa.
+    - Hakuna session ya old boss/staff itakayopingana na login mpya.
+    """
     session.permanent = False
-
 # =================== MULTI-ROLE DECORATOR ===================
 def role_required(*allowed_roles):
+    """
+    Decorator ya Flask kwa role-based access control.
+    Roles zinazokubaliwa: 'boss', 'staff', 'admin'
+    """
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
+            # Map role na session key yao
             role_session_map = {
                 "boss": "boss_id",
                 "staff": "staff_id",
@@ -137,6 +59,7 @@ def role_required(*allowed_roles):
 
             flash("⚠️ Huna ruhusa ku-access ukurasa huu", "danger")
             
+            # Redirect kulingana na priority
             if "superadmin_id" in session:
                 return redirect(url_for("superadmin_dashboard"))
             elif "boss_id" in session:
@@ -148,6 +71,7 @@ def role_required(*allowed_roles):
             
         return decorated_function
     return decorator
+    
 
 # ================= DATABASE CONNECTION ==================
 def get_db_connection():
@@ -155,7 +79,7 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
-# ================= SUPER ADMIN ROUTES ==================
+# ================= SUPER ADMIN ==================
 @app.route("/superadmin/login", methods=["GET", "POST"])
 def superadmin_login():
     if request.method == "POST":
@@ -173,6 +97,7 @@ def superadmin_login():
         flash("Username au password si sahihi.", "danger")
     return render_template("superadmin_login.html")
 
+# ================= SUPER ADMIN DASHBOARD ==================
 @app.route("/superadmin/dashboard")
 def superadmin_dashboard():
     if "superadmin_id" not in session:
@@ -186,7 +111,100 @@ def superadmin_dashboard():
     conn.close()
     return render_template("superadmin_dashboard.html", bosses=bosses)
 
-# ================= BOSS SIGNUP ROUTE ==================
+@app.route("/superadmin/boss_customers", methods=["GET", "POST"])
+def superadmin_boss_customers():
+    if "superadmin_id" not in session:
+        flash("Tafadhali ingia kama Super Admin.", "danger")
+        return redirect(url_for("superadmin_login"))
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Pata maboss wote
+    cur.execute("SELECT boss_id, full_name, username FROM boss ORDER BY full_name")
+    bosses = cur.fetchall()
+
+    selected_boss_id = None
+    customers = []
+
+    if request.method == "POST":
+        selected_boss_id = request.form.get("boss_id")
+        if selected_boss_id:
+            cur.execute("""
+                SELECT * FROM customers
+                WHERE boss_id = ?
+                ORDER BY created_at DESC
+            """, (selected_boss_id,))
+            customers = cur.fetchall()
+
+    conn.close()
+    return render_template(
+        "superadmin_boss_customers.html",
+        bosses=bosses,
+        customers=customers,
+        selected_boss_id=selected_boss_id
+    )
+
+@app.route("/superadmin/toggle_boss/<boss_id>")
+def toggle_boss(boss_id):
+    if "superadmin_id" not in session:
+        flash("Login required", "danger")
+        return redirect(url_for("superadmin_login"))
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("SELECT status FROM boss WHERE boss_id=?", (boss_id,))
+    boss = cur.fetchone()
+
+    if boss:
+        if boss["status"] == "ACTIVE":
+            new_status = "INACTIVE"
+            cur.execute(
+                "UPDATE boss SET status=? WHERE boss_id=?",
+                (new_status, boss_id)
+            )
+        else:
+            # 🔥 HAPA NDIPO MUHIMU
+            new_status = "ACTIVE"
+            new_trial_end = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
+
+            cur.execute("""
+                UPDATE boss 
+                SET status=?, trial_end_date=? 
+                WHERE boss_id=?
+            """, (new_status, new_trial_end, boss_id))
+
+        conn.commit()
+        flash(f"Boss status imebadilishwa kuwa {new_status}", "success")
+    else:
+        flash("Boss haipo", "danger")
+
+    conn.close()
+    return redirect(url_for("superadmin_dashboard"))
+
+@app.route("/superadmin/reset_boss_password/<boss_id>")
+def superadmin_reset_boss_password(boss_id):
+    if "superadmin_id" not in session:
+        flash("Login required", "danger")
+        return redirect(url_for("superadmin_login"))
+    new_password = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
+    hashed_pw = generate_password_hash(new_password)
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("UPDATE boss SET password=? WHERE boss_id=?", (hashed_pw, boss_id))
+    conn.commit()
+    conn.close()
+    flash(f"Password mpya ya boss: {new_password}", "success")
+    return redirect(url_for("superadmin_dashboard"))
+
+@app.route("/superadmin/logout")
+def superadmin_logout():
+    session.pop("superadmin_id", None)
+    flash("Umetoka kwenye Super Admin", "success")
+    return redirect(url_for("superadmin_login"))
+
+# ================= BOSS ==================
 @app.route("/boss/signup", methods=["GET", "POST"])
 def boss_signup():
     if request.method == "POST":
@@ -212,12 +230,6 @@ def boss_signup():
         conn.close()
         return redirect(url_for("boss_login"))
     return render_template("boss_signup.html")
-
-# ===================== MAIN ======================
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
-
-
 
 @app.route("/boss/login", methods=["GET", "POST"])
 def boss_login():
