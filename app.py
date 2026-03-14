@@ -20,167 +20,194 @@ DB_PATH = "water_supply.db"
 # DATABASE SETUP FUNCTION
 # ================================
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
 
-    # SUPER ADMIN
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS super_admin (
-        admin_id TEXT PRIMARY KEY,
-        username TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        created_at TEXT NOT NULL
-    )
-    """)
-    default_admin_id = "ADMIN-" + str(uuid.uuid4())
-    cur.execute("""
-    INSERT OR IGNORE INTO super_admin 
-    (admin_id, username, password, created_at)
-    VALUES (?, ?, ?, ?)
-    """, (
-        default_admin_id,
-        "admin",
-        generate_password_hash("1234"),
-        datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    ))
+        # =====================================================
+        # SUPER ADMIN
+        # =====================================================
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS super_admin (
+            admin_id TEXT PRIMARY KEY,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """)
+        default_admin_id = "ADMIN-" + str(uuid.uuid4())
+        cur.execute("""
+        INSERT OR IGNORE INTO super_admin 
+        (admin_id, username, password, created_at)
+        VALUES (?, ?, ?, ?)
+        """, (
+            default_admin_id,
+            "admin",
+            generate_password_hash("1234"),
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ))
 
-    # BOSS
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS boss (
-        boss_id TEXT PRIMARY KEY,
-        full_name TEXT NOT NULL,
-        username TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        signup_date TEXT NOT NULL,
-        trial_end_date TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'ACTIVE',
-        created_at TEXT NOT NULL
-    )
-    """)
+        # =====================================================
+        # BOSS
+        # =====================================================
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS boss (
+            boss_id TEXT PRIMARY KEY,
+            full_name TEXT NOT NULL,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            signup_date TEXT NOT NULL,
+            trial_end_date TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'ACTIVE',
+            created_at TEXT NOT NULL
+        )
+        """)
 
-    # STAFF
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS staff (
-        staff_id TEXT PRIMARY KEY,
-        boss_id TEXT NOT NULL,
-        full_name TEXT NOT NULL,
-        username TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        role TEXT,
-        status TEXT NOT NULL DEFAULT 'ACTIVE',
-        created_at TEXT NOT NULL,
-        FOREIGN KEY (boss_id) REFERENCES boss(boss_id) ON DELETE CASCADE
-    )
-    """)
+        # =====================================================
+        # STAFF
+        # =====================================================
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS staff (
+            staff_id TEXT PRIMARY KEY,
+            boss_id TEXT NOT NULL,
+            full_name TEXT NOT NULL,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            role TEXT,
+            status TEXT NOT NULL DEFAULT 'ACTIVE',
+            created_at TEXT NOT NULL,
+            permissions TEXT,
+            FOREIGN KEY (boss_id) REFERENCES boss(boss_id) ON DELETE CASCADE
+        )
+        """)
 
-    # CUSTOMERS
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS customers (
-        customer_id TEXT PRIMARY KEY,
-        boss_id TEXT NOT NULL,
-        full_name TEXT NOT NULL,
-        phone TEXT,
-        area TEXT,
-        house_number TEXT,
-        meter_number TEXT,
-        signup_date TEXT,
-        status TEXT DEFAULT 'ACTIVE',
-        created_at TEXT NOT NULL,
-        FOREIGN KEY (boss_id) REFERENCES boss(boss_id) ON DELETE CASCADE
-    )
-    """)
+        # =====================================================
+        # CUSTOMERS
+        # =====================================================
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS customers (
+            customer_id TEXT PRIMARY KEY,
+            boss_id TEXT NOT NULL,
+            full_name TEXT NOT NULL,
+            phone TEXT,
+            area TEXT,
+            house_number TEXT,
+            meter_number TEXT,
+            signup_date TEXT,
+            status TEXT DEFAULT 'ACTIVE',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (boss_id) REFERENCES boss(boss_id) ON DELETE CASCADE
+        )
+        """)
 
-    # =====================================================
-    # METERS TABLE
-    # =====================================================
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS meters (
-        meter_id TEXT PRIMARY KEY,
-        meter_number TEXT UNIQUE NOT NULL,
-        customer_id TEXT NOT NULL,
-        status TEXT DEFAULT 'ACTIVE',
-        FOREIGN KEY (customer_id) REFERENCES customers(customer_id) ON DELETE CASCADE
-    )
-    """)
+        # =====================================================
+        # METERS
+        # =====================================================
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS meters (
+            meter_id TEXT PRIMARY KEY,
+            meter_number TEXT UNIQUE NOT NULL,
+            customer_id TEXT NOT NULL,
+            status TEXT DEFAULT 'ACTIVE',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (customer_id) REFERENCES customers(customer_id) ON DELETE CASCADE
+        )
+        """)
 
-    # =====================================================
-    # TARIFFS TABLE
-    # =====================================================
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS tariffs (
-        tariff_id TEXT PRIMARY KEY,
-        boss_id TEXT NOT NULL,
-        price_per_unit REAL NOT NULL,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY (boss_id) REFERENCES boss(boss_id) ON DELETE CASCADE
-    )
-    """)
+        # =====================================================
+        # TARIFFS
+        # =====================================================
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS tariffs (
+            tariff_id TEXT PRIMARY KEY,
+            boss_id TEXT NOT NULL,
+            price_per_unit REAL NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (boss_id) REFERENCES boss(boss_id) ON DELETE CASCADE
+        )
+        """)
 
-    # =====================================================
-    # METER READINGS
-    # =====================================================
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS meter_readings (
-        reading_id TEXT PRIMARY KEY,
-        meter_id TEXT NOT NULL,
-        reading_value REAL NOT NULL,
-        reading_date TEXT NOT NULL,
-        recorded_by TEXT,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY (meter_id) REFERENCES meters(meter_id) ON DELETE CASCADE
-    )
-    """)
+        # =====================================================
+        # METER READINGS
+        # =====================================================
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS meter_readings (
+            reading_id TEXT PRIMARY KEY,
+            meter_id TEXT NOT NULL,
+            reading_value REAL NOT NULL,
+            reading_date TEXT NOT NULL,
+            recorded_by TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (meter_id) REFERENCES meters(meter_id) ON DELETE CASCADE
+        )
+        """)
 
-    # =====================================================
-    # BILLS
-    # =====================================================
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS bills (
-        bill_id TEXT PRIMARY KEY,
-        customer_id TEXT NOT NULL,
-        meter_id TEXT NOT NULL,
-        previous_reading REAL,
-        current_reading REAL,
-        units_used REAL,
-        amount REAL,
-        bill_month TEXT,
-        status TEXT DEFAULT 'UNPAID',
-        created_at TEXT NOT NULL,
-        FOREIGN KEY (customer_id) REFERENCES customers(customer_id) ON DELETE CASCADE
-    )
-    """)
+        # =====================================================
+        # BILLS
+        # =====================================================
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS bills (
+            bill_id TEXT PRIMARY KEY,
+            customer_id TEXT NOT NULL,
+            meter_id TEXT NOT NULL,
+            previous_reading REAL,
+            current_reading REAL,
+            units_used REAL,
+            amount REAL,
+            billing_month TEXT,
+            status TEXT DEFAULT 'UNPAID',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (customer_id) REFERENCES customers(customer_id) ON DELETE CASCADE,
+            FOREIGN KEY (meter_id) REFERENCES meters(meter_id) ON DELETE CASCADE
+        )
+        """)
 
-    # =====================================================
-    # PAYMENTS
-    # =====================================================
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS payments (
-        payment_id TEXT PRIMARY KEY,
-        bill_id TEXT NOT NULL,
-        amount_paid REAL NOT NULL,
-        payment_method TEXT,
-        payment_date TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY (bill_id) REFERENCES bills(bill_id) ON DELETE CASCADE
-    )
-    """)
+        # =====================================================
+        # PAYMENTS
+        # =====================================================
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS payments (
+            payment_id TEXT PRIMARY KEY,
+            bill_id TEXT NOT NULL,
+            customer_id TEXT NOT NULL,
+            boss_id TEXT NOT NULL,
+            amount_paid REAL NOT NULL,
+            payment_method TEXT,
+            reference TEXT,
+            paid_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (bill_id) REFERENCES bills(bill_id) ON DELETE CASCADE,
+            FOREIGN KEY (customer_id) REFERENCES customers(customer_id) ON DELETE CASCADE,
+            FOREIGN KEY (boss_id) REFERENCES boss(boss_id) ON DELETE CASCADE
+        )
+        """)
 
-    # =====================================================
-    # RECEIPTS
-    # =====================================================
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS receipts (
-        receipt_id TEXT PRIMARY KEY,
-        payment_id TEXT NOT NULL,
-        receipt_number TEXT UNIQUE,
-        issued_date TEXT NOT NULL,
-        FOREIGN KEY (payment_id) REFERENCES payments(payment_id) ON DELETE CASCADE
-    )
-    """)
+        # =====================================================
+        # RECEIPTS
+        # =====================================================
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS receipts (
+            receipt_id TEXT PRIMARY KEY,
+            payment_id TEXT NOT NULL,
+            receipt_number TEXT UNIQUE,
+            customer_id TEXT NOT NULL,
+            boss_id TEXT NOT NULL,
+            amount REAL,
+            issued_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            notes TEXT,
+            FOREIGN KEY (payment_id) REFERENCES payments(payment_id) ON DELETE CASCADE,
+            FOREIGN KEY (customer_id) REFERENCES customers(customer_id) ON DELETE CASCADE,
+            FOREIGN KEY (boss_id) REFERENCES boss(boss_id) ON DELETE CASCADE
+        )
+        """)
 
-    conn.commit()
-    conn.close()
-    print("✅ Database setup complete.")
+        conn.commit()
+        conn.close()
+        print("✅ Database setup complete.")
+    except Exception as e:
+        print("❌ Error setting up database:", str(e))
+        traceback.print_exc()
 # ================================
 # INIT DATABASE ROUTE (kwa testing)
 # ================================
