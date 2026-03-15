@@ -354,6 +354,12 @@ def superadmin_dashboard():
     bosses = cur.fetchall()
     conn.close()
     return render_template("superadmin_dashboard.html", bosses=bosses)
+    
+@app.route("/superadmin/logout")
+def superadmin_logout():
+    session.pop("superadmin_id", None)
+    flash("Umetoka kwenye mfumo", "info")
+    return redirect(url_for("superadmin_login"))    
 
 # ================= BOSS SIGNUP ROUTE ==================
 @app.route("/boss/signup", methods=["GET", "POST"])
