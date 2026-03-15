@@ -365,6 +365,20 @@ def superadmin_dashboard():
     return render_template("superadmin_dashboard.html", bosses=bosses)
     
     
+@app.route("/superadmin/boss/<boss_id>/reset", methods=["POST","GET"])
+def superadmin_reset_boss_password(boss_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    # Example: reset password to "password123"
+    from werkzeug.security import generate_password_hash
+    hashed = generate_password_hash("password123")
+    cur.execute("UPDATE boss SET password=? WHERE boss_id=?", (hashed, boss_id))
+    conn.commit()
+    conn.close()
+    flash("Boss password has been reset.", "success")
+    return redirect(url_for("superadmin_dashboard"))    
+    
+    
 @app.route("/superadmin/boss/<boss_id>/toggle")
 def toggle_boss(boss_id):
     conn = get_db_connection()
