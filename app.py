@@ -633,11 +633,12 @@ def add_customer():
         return redirect(url_for("boss_login"))
 
     if request.method == "POST":
-        full_name = request.form.get("full_name")
-        phone = request.form.get("phone")
-        area = request.form.get("area")
-        house_number = request.form.get("house_number")
-        meter_number = request.form.get("meter_number")
+        # Trim all inputs to avoid false positives
+        full_name = request.form.get("full_name", "").strip()
+        phone = request.form.get("phone", "").strip()
+        area = request.form.get("area", "").strip()
+        house_number = request.form.get("house_number", "").strip()
+        meter_number = request.form.get("meter_number", "").strip()
 
         # ✅ Validation
         if not full_name or not meter_number:
@@ -650,13 +651,16 @@ def add_customer():
         try:
             # ✅ Angalia kama meter ipo tayari
             cur.execute("SELECT * FROM meters WHERE meter_number = ?", (meter_number,))
-            if cur.fetchone():
+            existing_meter = cur.fetchone()
+            if existing_meter:
                 flash(f"⚠️ Meter {meter_number} tayari ipo kwenye mfumo.", "warning")
                 return redirect(url_for("add_customer"))
 
             # ✅ Angalia kama mteja tayari yupo kwa jina + simu + boss_id
-            cur.execute("SELECT * FROM customers WHERE full_name=? AND phone=? AND boss_id=?",
-                        (full_name, phone, session["boss_id"]))
+            cur.execute(
+                "SELECT * FROM customers WHERE full_name=? AND phone=? AND boss_id=?",
+                (full_name, phone, session["boss_id"])
+            )
             existing_customer = cur.fetchone()
 
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -685,10 +689,8 @@ def add_customer():
             conn.commit()
             flash(f"✅ Meter {meter_number} imeongezwa kwa {full_name}", "success")
 
-        except sqlite3.IntegrityError:
-            conn.rollback()
-            flash("⚠️ Meter au mteja tayari ipo kwenye mfumo.", "warning")
         except Exception as e:
+            # Catch generic exception (IntegrityError included) for better debugging
             conn.rollback()
             flash(f"❌ Tatizo limetokea: {str(e)}", "danger")
         finally:
@@ -697,7 +699,9 @@ def add_customer():
         return redirect(url_for("boss_dashboard"))
 
     return render_template("add_customer.html")
-    
+
+
+
 @app.route("/boss/edit_customer/<customer_id>", methods=["GET", "POST"])
 def edit_customer(customer_id):
     if "boss_id" not in session:
