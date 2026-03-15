@@ -184,6 +184,7 @@ def init_db():
             amount REAL,
             billing_month TEXT,
             status TEXT DEFAULT 'UNPAID',
+            payment_method TEXT,
             created_at TEXT NOT NULL,
             FOREIGN KEY (customer_id) REFERENCES customers(customer_id) ON DELETE CASCADE,
             FOREIGN KEY (meter_id) REFERENCES meters(meter_id) ON DELETE CASCADE
