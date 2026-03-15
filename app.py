@@ -355,6 +355,26 @@ def superadmin_dashboard():
     conn.close()
     return render_template("superadmin_dashboard.html", bosses=bosses)
     
+    
+    
+@app.route("/superadmin/boss/<int:boss_id>/toggle")
+def toggle_boss(boss_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    # example toggle logic
+    cur.execute("SELECT status FROM boss WHERE boss_id=?", (boss_id,))
+    boss = cur.fetchone()
+    if boss["status"] == "ACTIVE":
+        cur.execute("UPDATE boss SET status='INACTIVE' WHERE boss_id=?", (boss_id,))
+    else:
+        cur.execute("UPDATE boss SET status='ACTIVE' WHERE boss_id=?", (boss_id,))
+    conn.commit()
+    conn.close()
+    flash("Boss status updated.", "success")
+    return redirect(url_for("superadmin_dashboard"))    
+
+    
+    
 @app.route("/superadmin/logout")
 def superadmin_logout():
     session.pop("superadmin_id", None)
