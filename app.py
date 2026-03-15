@@ -32,7 +32,7 @@ def init_db():
             admin_id TEXT PRIMARY KEY,
             username TEXT UNIQUE NOT NULL,
             password TEXT NOT NULL,
-            created_at TEXT NOT NULL
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
         """)
         default_admin_id = "ADMIN-" + str(uuid.uuid4())
@@ -59,7 +59,7 @@ def init_db():
             signup_date TEXT NOT NULL,
             trial_end_date TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'ACTIVE',
-            created_at TEXT NOT NULL
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
         """)
 
@@ -75,7 +75,7 @@ def init_db():
             password TEXT NOT NULL,
             role TEXT,
             status TEXT NOT NULL DEFAULT 'ACTIVE',
-            created_at TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             permissions TEXT,
             FOREIGN KEY (boss_id) REFERENCES boss(boss_id) ON DELETE CASCADE
         )
@@ -95,7 +95,7 @@ def init_db():
             meter_number TEXT,
             signup_date TEXT,
             status TEXT DEFAULT 'ACTIVE',
-            created_at TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (boss_id) REFERENCES boss(boss_id) ON DELETE CASCADE
         )
         """)
@@ -109,7 +109,7 @@ def init_db():
             meter_number TEXT UNIQUE NOT NULL,
             customer_id TEXT NOT NULL,
             status TEXT DEFAULT 'ACTIVE',
-            created_at TEXT NOT NULL CURRENT_TIMESTAMP,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (customer_id) REFERENCES customers(customer_id) ON DELETE CASCADE
         )
         """)
@@ -122,7 +122,7 @@ def init_db():
             tariff_id TEXT PRIMARY KEY,
             boss_id TEXT NOT NULL,
             price_per_unit REAL NOT NULL,
-            created_at TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (boss_id) REFERENCES boss(boss_id) ON DELETE CASCADE
         )
         """)
@@ -136,7 +136,7 @@ def init_db():
             boss_id TEXT NOT NULL,
             master_number TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'ACTIVE',
-            created_at TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (boss_id) REFERENCES boss(boss_id) ON DELETE CASCADE
         )
         """)
@@ -150,7 +150,7 @@ def init_db():
             master_id TEXT NOT NULL,
             reading_value REAL NOT NULL,
             reading_date TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (master_id) REFERENCES master_meter(master_id) ON DELETE CASCADE
         )
         """)
@@ -165,7 +165,7 @@ def init_db():
             reading_value REAL NOT NULL,
             reading_date TEXT NOT NULL,
             recorded_by TEXT,
-            created_at TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (meter_id) REFERENCES meters(meter_id) ON DELETE CASCADE
         )
         """)
@@ -186,7 +186,7 @@ def init_db():
             status TEXT DEFAULT 'UNPAID',
             payment_method TEXT,
             payment_date TEXT,
-            created_at TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (customer_id) REFERENCES customers(customer_id) ON DELETE CASCADE,
             FOREIGN KEY (meter_id) REFERENCES meters(meter_id) ON DELETE CASCADE
         )
@@ -205,7 +205,7 @@ def init_db():
             payment_method TEXT,
             reference TEXT,
             paid_at TEXT NOT NULL,
-            created_at TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (bill_id) REFERENCES bills(bill_id) ON DELETE CASCADE,
             FOREIGN KEY (customer_id) REFERENCES customers(customer_id) ON DELETE CASCADE,
             FOREIGN KEY (boss_id) REFERENCES boss(boss_id) ON DELETE CASCADE
@@ -224,7 +224,7 @@ def init_db():
             boss_id TEXT NOT NULL,
             amount REAL,
             issued_at TEXT NOT NULL,
-            created_at TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             notes TEXT,
             FOREIGN KEY (payment_id) REFERENCES payments(payment_id) ON DELETE CASCADE,
             FOREIGN KEY (customer_id) REFERENCES customers(customer_id) ON DELETE CASCADE,
