@@ -128,6 +128,34 @@ def init_db():
         """)
 
         # =====================================================
+        # MASTER METER
+        # =====================================================
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS master_meter (
+            master_id TEXT PRIMARY KEY,
+            boss_id TEXT NOT NULL,
+            master_number TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'ACTIVE',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (boss_id) REFERENCES boss(boss_id) ON DELETE CASCADE
+        )
+        """)
+
+        # =====================================================
+        # MASTER METER READINGS
+        # =====================================================
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS master_meter_readings (
+            reading_id TEXT PRIMARY KEY,
+            master_id TEXT NOT NULL,
+            reading_value REAL NOT NULL,
+            reading_date TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (master_id) REFERENCES master_meter(master_id) ON DELETE CASCADE
+        )
+        """)
+
+        # =====================================================
         # METER READINGS
         # =====================================================
         cur.execute("""
@@ -202,12 +230,40 @@ def init_db():
         )
         """)
 
+        # =====================================================
+        # ACTIVITY LOGS
+        # =====================================================
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS activity_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_name TEXT,
+            role TEXT,
+            action TEXT,
+            details TEXT,
+            time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            boss_id TEXT
+        )
+        """)
+
+        # =====================================================
+        # ANDROID METADATA
+        # =====================================================
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS android_metadata (
+            locale TEXT
+        )
+        """)
+
         conn.commit()
         conn.close()
         print("✅ Database setup complete.")
+
     except Exception as e:
         print("❌ Error setting up database:", str(e))
         traceback.print_exc()
+
+# Run DB initialization when app starts
+init_db()
 # ================================
 # INIT DATABASE ROUTE (kwa testing)
 # ================================
