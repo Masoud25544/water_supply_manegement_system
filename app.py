@@ -633,14 +633,14 @@ def add_customer():
         return redirect(url_for("boss_login"))
 
     if request.method == "POST":
-        # Trim all inputs to avoid false positives
+        # Trim all inputs to avoid spaces issues
         full_name = request.form.get("full_name", "").strip()
         phone = request.form.get("phone", "").strip()
         area = request.form.get("area", "").strip()
         house_number = request.form.get("house_number", "").strip()
         meter_number = request.form.get("meter_number", "").strip()
 
-        # ✅ Validation
+        # Validation
         if not full_name or not meter_number:
             flash("Jina kamili na meter number ni lazima!", "danger")
             return redirect(url_for("add_customer"))
@@ -649,14 +649,14 @@ def add_customer():
         cur = conn.cursor()
 
         try:
-            # ✅ Angalia kama meter ipo tayari
+            # Check if meter exists
             cur.execute("SELECT * FROM meters WHERE meter_number = ?", (meter_number,))
             existing_meter = cur.fetchone()
             if existing_meter:
                 flash(f"⚠️ Meter {meter_number} tayari ipo kwenye mfumo.", "warning")
                 return redirect(url_for("add_customer"))
 
-            # ✅ Angalia kama mteja tayari yupo kwa jina + simu + boss_id
+            # Check if customer exists
             cur.execute(
                 "SELECT * FROM customers WHERE full_name=? AND phone=? AND boss_id=?",
                 (full_name, phone, session["boss_id"])
@@ -670,7 +670,7 @@ def add_customer():
                 customer_id = existing_customer["customer_id"]
                 flash(f"ℹ️ Mteja {full_name} tayari yupo. Tena tunaongeza meter.", "info")
             else:
-                # ✅ Ingiza mteja mpya
+                # Insert new customer
                 customer_id = "CUST-" + str(uuid.uuid4())[:8]
                 cur.execute("""
                     INSERT INTO customers 
@@ -679,18 +679,17 @@ def add_customer():
                 """, (customer_id, session["boss_id"], full_name, phone, area, house_number, status, now, now))
                 flash(f"✅ Mteja {full_name} amesajiliwa kikamilifu!", "success")
 
-            # ✅ Ingiza meter
+            # Insert meter with created_at timestamp
             meter_id = "MTR-" + str(uuid.uuid4())[:8]
             cur.execute("""
-                INSERT INTO meters (meter_id, meter_number, customer_id, status)
-                VALUES (?, ?, ?, ?)
-            """, (meter_id, meter_number, customer_id, status))
+                INSERT INTO meters (meter_id, meter_number, customer_id, status, created_at)
+                VALUES (?, ?, ?, ?, ?)
+            """, (meter_id, meter_number, customer_id, status, now))
 
             conn.commit()
             flash(f"✅ Meter {meter_number} imeongezwa kwa {full_name}", "success")
 
         except Exception as e:
-            # Catch generic exception (IntegrityError included) for better debugging
             conn.rollback()
             flash(f"❌ Tatizo limetokea: {str(e)}", "danger")
         finally:
@@ -699,8 +698,6 @@ def add_customer():
         return redirect(url_for("boss_dashboard"))
 
     return render_template("add_customer.html")
-
-
 
 @app.route("/boss/edit_customer/<customer_id>", methods=["GET", "POST"])
 def edit_customer(customer_id):
