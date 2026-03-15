@@ -347,6 +347,18 @@ def superadmin_login():
 
     return render_template("superadmin_login.html")
     
+@app.route("/superadmin/dashboard")
+def superadmin_dashboard():
+    if "superadmin_id" not in session:
+        return redirect(url_for("superadmin_login"))
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT boss_id, full_name, username, status, trial_end_date FROM boss ORDER BY full_name")
+    bosses = cur.fetchall()
+    conn.close()
+    return render_template("superadmin_dashboard.html", bosses=bosses)    
+    
     
 @app.route("/superadmin/boss/<int:boss_id>/toggle")
 def toggle_boss(boss_id):
