@@ -365,6 +365,20 @@ def superadmin_dashboard():
     return render_template("superadmin_dashboard.html", bosses=bosses)
     
     
+@app.route("/superadmin/boss/<boss_id>/customers")
+def superadmin_boss_customers(boss_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM customer WHERE boss_id=?", (boss_id,))
+    customers = cur.fetchall()
+    conn.close()
+    # Temporary: show list in HTML
+    output = "<h1>Customers for Boss {}</h1><ul>".format(boss_id)
+    for c in customers:
+        output += "<li>{} | {} | {}</li>".format(c["customer_id"], c["full_name"], c["username"])
+    output += "</ul>"
+    return output    
+    
 @app.route("/superadmin/boss/<boss_id>/reset", methods=["POST","GET"])
 def superadmin_reset_boss_password(boss_id):
     conn = get_db_connection()
