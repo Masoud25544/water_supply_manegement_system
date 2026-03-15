@@ -330,31 +330,22 @@ def superadmin_login():
     if request.method == "POST":
         username = request.form.get("username")
         password = request.form.get("password")
+
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("SELECT * FROM super_admin WHERE username=?", (username,))
-        admin = cur.fetchone()
+        admin = cur.fetchone()  # sasa admin ni dict
         conn.close()
+
         if admin and check_password_hash(admin["password"], password):
+            # hakikisha session key inasetiwa
             session["superadmin_id"] = admin["admin_id"]
             flash("Karibu Super Admin!", "success")
             return redirect(url_for("superadmin_dashboard"))
+
         flash("Username au password si sahihi.", "danger")
+
     return render_template("superadmin_login.html")
-
-@app.route("/superadmin/dashboard")
-def superadmin_dashboard():
-    if "superadmin_id" not in session:
-        flash("Login required", "danger")
-        return redirect(url_for("superadmin_login"))
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT boss_id, full_name, username, status, trial_end_date FROM boss ORDER BY full_name")
-    bosses = cur.fetchall()
-    conn.close()
-    return render_template("superadmin_dashboard.html", bosses=bosses)
-    
     
     
 @app.route("/superadmin/boss/<int:boss_id>/toggle")
