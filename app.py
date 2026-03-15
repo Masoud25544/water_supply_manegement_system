@@ -350,14 +350,19 @@ def superadmin_login():
 @app.route("/superadmin/dashboard")
 def superadmin_dashboard():
     if "superadmin_id" not in session:
+        print("No session key found!")   # Debug
         return redirect(url_for("superadmin_login"))
+
+    print("Session keys:", session)    # Debug: ona superadmin_id ipo
 
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute("SELECT boss_id, full_name, username, status, trial_end_date FROM boss ORDER BY full_name")
     bosses = cur.fetchall()
+    print("Bosses fetched:", bosses)    # Debug: ona kama query inarudisha data
     conn.close()
-    return render_template("superadmin_dashboard.html", bosses=bosses)    
+
+    return render_template("superadmin_dashboard.html", bosses=bosses)
     
     
 @app.route("/superadmin/boss/<int:boss_id>/toggle")
@@ -2017,6 +2022,21 @@ def index():
     # Rudisha user kwa login page
     return redirect(url_for("boss_login"))
     # au kwa superadmin: return redirect(url_for("superadmin_login"))    
+    
+    
+    
+@app.route("/check_bosses")
+def check_bosses():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM boss ORDER BY full_name")
+    bosses = cur.fetchall()
+    conn.close()
+    output = "<h1>Bosses on Render DB</h1><ul>"
+    for b in bosses:
+        output += f"<li>{b['boss_id']} | {b['full_name']} | {b['username']} | {b['status']} | {b['trial_end_date']}</li>"
+    output += "</ul>"
+    return output    
 # ================= RUN APP ==================
 if __name__ == "__main__":
     import os
