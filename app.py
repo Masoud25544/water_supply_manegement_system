@@ -109,7 +109,7 @@ def init_db():
             meter_number TEXT UNIQUE NOT NULL,
             customer_id TEXT NOT NULL,
             status TEXT DEFAULT 'ACTIVE',
-            created_at TEXT NOT NULL,
+            created_at TEXT NOT NULL CURRENT_TIMESTAMP,
             FOREIGN KEY (customer_id) REFERENCES customers(customer_id) ON DELETE CASCADE
         )
         """)
