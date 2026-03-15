@@ -812,6 +812,7 @@ def delete_customer(customer_id):
         return redirect(url_for("boss_dashboard"))
     
 # ================= READ METER =====================
+
 @app.route("/read_meter", methods=["GET", "POST"])
 def read_meter():
 
@@ -893,13 +894,15 @@ def read_meter():
         """, (meter["meter_id"],))
         last_bill = cur.fetchone()
 
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
         if not last_bill:
             # Meter mpya → insert baseline reading tu, hakuna bill
             cur.execute("""
                 INSERT INTO bills
                 (bill_id, customer_id, meter_id, previous_reading, current_reading, units_used,
-                 amount, billing_month, status, created_at, read_by, reader_role)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 amount, billing_month, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 "BILL-" + str(uuid.uuid4())[:8],
                 meter["customer_id"],
@@ -910,9 +913,7 @@ def read_meter():
                 0,                 # amount = 0
                 billing_month,
                 'BASELINE',        # status BASELINE
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                user_id,
-                user_role
+                now
             ))
             conn.commit()
             flash(f"✅ Reading imehifadhiwa kama baseline. Bill bado haijajengwa.", "success")
@@ -924,7 +925,6 @@ def read_meter():
         last_billing_month = last_bill["billing_month"]
 
         if last_billing_month == billing_month:
-            # Imejaribu kusoma tena mwezi huu
             flash(f"⚠️ Meter tayari imesomwa mwezi huu. Bill haijengeki mara mbili.", "info")
             conn.close()
             return render_template("read_meter.html", bill=None)
@@ -946,15 +946,14 @@ def read_meter():
 
         amount = units_used * price_per_unit
         bill_id = "BILL-" + str(uuid.uuid4())[:8]
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # 🔹 Insert bill mpya
+        # 🔹 Insert bill mpya bila read_by na reader_role
         cur.execute("""
             INSERT INTO bills
             (bill_id, customer_id, meter_id,
              previous_reading, current_reading, units_used,
-             amount, billing_month, status, created_at, read_by, reader_role)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             amount, billing_month, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             bill_id,
             meter["customer_id"],
@@ -965,9 +964,7 @@ def read_meter():
             amount,
             billing_month,
             'UNPAID',
-            now,
-            user_id,
-            user_role
+            now
         ))
         conn.commit()
 
@@ -983,6 +980,7 @@ def read_meter():
         flash(f"✅ Bill imejengwa kwa {meter_number} ({meter['full_name']})", "success")
 
     return render_template("read_meter.html", bill=bill)
+
 
 @app.route("/boss/meters")
 def boss_meters():
