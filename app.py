@@ -369,7 +369,7 @@ def superadmin_dashboard():
 def superadmin_boss_customers(boss_id):
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("SELECT * FROM customers WHERE boss_id=?", (boss_id,))
+    cur.execute("SELECT * FROM customer WHERE boss_id=?", (boss_id,))
     customers = cur.fetchall()
     conn.close()
     # Temporary: show list in HTML
