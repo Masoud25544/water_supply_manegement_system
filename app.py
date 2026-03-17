@@ -365,34 +365,103 @@ def superadmin_dashboard():
     return render_template("superadmin_dashboard.html", bosses=bosses)
     
     
-@app.route("/superadmin/boss/<boss_id>/customers")
-def superadmin_boss_customers(boss_id):
+@app.route("/superadmin/boss/customers", methods=["GET", "POST"])
+def superadmin_boss_customers():
+    if "superadmin_id" not in session:
+        flash("Unauthorized access", "danger")
+        return redirect(url_for("superadmin_login"))
+
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("SELECT * FROM customer WHERE boss_id=?", (boss_id,))
-    customers = cur.fetchall()
+
+    # Pata maboss
+    cur.execute("SELECT boss_id, full_name, username FROM boss ORDER BY full_name")
+    bosses = cur.fetchall()
+
+    selected_boss_id = None
+    customers = []
+
+    if request.method == "POST":
+        selected_boss_id = request.form.get("boss_id")
+
+        if selected_boss_id:
+            # 🔥 JOIN na meters table + GROUP_CONCAT
+            cur.execute("""
+                SELECT 
+                    c.customer_id,
+                    c.full_name,
+                    c.phone,
+                    c.area,
+                    c.house_number,
+                    c.status,
+                    GROUP_CONCAT(m.meter_number) AS meters
+                FROM customers c
+                LEFT JOIN meters m ON c.customer_id = m.customer_id
+                WHERE c.boss_id = ?
+                GROUP BY c.customer_id
+                ORDER BY c.full_name
+            """, (selected_boss_id,))
+
+            customers = cur.fetchall()
+
     conn.close()
-    # Temporary: show list in HTML
-    output = "<h1>Customers for Boss {}</h1><ul>".format(boss_id)
-    for c in customers:
-        output += "<li>{} | {} | {}</li>".format(c["customer_id"], c["full_name"], c["username"])
-    output += "</ul>"
-    return output    
+
+    return render_template(
+        "superadmin_boss_customers.html",
+        bosses=bosses,
+        selected_boss_id=selected_boss_id,
+        customers=customers
+    )
     
-@app.route("/superadmin/boss/<boss_id>/reset", methods=["POST","GET"])
-def superadmin_reset_boss_password(boss_id):
+@app.route("/superadmin/customer/<customer_id>/meters")
+def superadmin_customer_meters(customer_id):
+    # Hakikisha superadmin ame-login
+    if "superadmin_id" not in session:
+        return redirect(url_for("superadmin_login"))
+
     conn = get_db_connection()
     cur = conn.cursor()
-    # Example: reset password to "password123"
-    from werkzeug.security import generate_password_hash
-    hashed = generate_password_hash("password123")
-    cur.execute("UPDATE boss SET password=? WHERE boss_id=?", (hashed, boss_id))
+
+    # Pata customer info
+    cur.execute("SELECT full_name FROM customers WHERE customer_id = ?", (customer_id,))
+    customer = cur.fetchone()
+
+    # Pata meters zote za customer huyu
+    cur.execute("""
+        SELECT meter_number, status, created_at
+        FROM meters
+        WHERE customer_id = ?
+        ORDER BY meter_id DESC
+    """, (customer_id,))
+    meters = cur.fetchall()
+
+    conn.close()
+
+    return render_template("superadmin_customer_meters.html", customer=customer, meters=meters)
+    
+@app.route("/superadmin/boss/<boss_id>/trigger_reset", methods=["POST"])
+def superadmin_trigger_boss_reset(boss_id):
+    if "superadmin_id" not in session:
+        flash("Unauthorized access", "danger")
+        return redirect(url_for("superadmin_login"))
+
+    temp_password = "reset123"  # Temporary password
+    hashed = generate_password_hash(temp_password)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE boss SET password=?, status='RESET_PENDING' WHERE boss_id=?",
+        (hashed, boss_id)
+    )
     conn.commit()
     conn.close()
-    flash("Boss password has been reset.", "success")
-    return redirect(url_for("superadmin_dashboard"))    
-    
-    
+
+    flash(f"Boss ameombwa kuweka PIN mpya. Temporary password ni: {temp_password}", "info")
+    return redirect(url_for("superadmin_dashboard"))
+
+
+
 @app.route("/superadmin/boss/<boss_id>/toggle")
 def toggle_boss(boss_id):
     conn = get_db_connection()
@@ -446,11 +515,10 @@ def boss_signup():
     return render_template("boss_signup.html")
 
 # ===================== MAIN ======================
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
 
 
 
+from werkzeug.security import check_password_hash
 @app.route("/boss/login", methods=["GET", "POST"])
 def boss_login():
     if request.method == "POST":
@@ -462,43 +530,75 @@ def boss_login():
         cur.execute("SELECT * FROM boss WHERE username=?", (username,))
         boss = cur.fetchone()
 
-        if boss and check_password_hash(boss["password"], password):
+        if boss:
+            # 🔹 RESET_PENDING: check temporary password
+            if boss["status"] == "RESET_PENDING":
+                if check_password_hash(boss["password"], password):
+                    session.clear()
+                    session["boss_id"] = boss["boss_id"]
+                    flash("Tafadhali weka PIN mpya.", "warning")
+                    conn.close()
+                    return redirect(url_for("boss_set_new_pin"))
+                else:
+                    flash("Temporary password sio sahihi.", "danger")
+                    conn.close()
+                    return redirect(url_for("boss_login"))
 
-            # 1️⃣ Check trial
-            now = datetime.now()
-            trial_end = datetime.strptime(boss["trial_end_date"], "%Y-%m-%d %H:%M:%S")
+            # 🔹 Normal login
+            if check_password_hash(boss["password"], password):
+                now = datetime.now()
+                trial_end = datetime.strptime(boss["trial_end_date"], "%Y-%m-%d %H:%M:%S")
+                if now > trial_end:
+                    cur.execute("UPDATE boss SET status=? WHERE boss_id=?", ("INACTIVE", boss["boss_id"]))
+                    conn.commit()
 
-            if now > trial_end:
-                cur.execute(
-                    "UPDATE boss SET status=? WHERE boss_id=?",
-                    ("INACTIVE", boss["boss_id"])
-                )
-                conn.commit()
+                session.clear()
+                session["boss_id"] = boss["boss_id"]
+                session["boss_status"] = boss["status"]
+                session["boss_name"] = boss["full_name"]
+                conn.close()
 
-            # 2️⃣ Login success
-            session.clear()
-            session["boss_id"] = boss["boss_id"]
-            session["boss_status"] = boss["status"]
-            session["boss_name"] = boss["full_name"]       # ✅ Hii tumiongeza
+                if boss["status"] == "INACTIVE":
+                    flash("Account yako ni INACTIVE.", "warning")
+                else:
+                    flash(f"Karibu, {boss['full_name']}!", "success")
 
-            conn.close()
-
-            if boss["status"] == "INACTIVE":
-                flash("Account yako ni INACTIVE. Baadhi ya huduma zimefungwa.", "warning")
-            else:
-                flash(f"Karibu, {boss['full_name']}!", "success")
-
-            return redirect(url_for("boss_dashboard"))
+                return redirect(url_for("boss_dashboard"))
 
         conn.close()
         flash("Username au password sio sahihi.", "danger")
         return redirect(url_for("boss_login"))
 
     return render_template("boss_login.html")
-    
-    
-    
 
+@app.route("/boss/set_new_pin", methods=["GET", "POST"])
+def boss_set_new_pin():
+    if "boss_id" not in session:
+        flash("Login kwanza.", "danger")
+        return redirect(url_for("boss_login"))
+
+    boss_id = session["boss_id"]
+
+    if request.method == "POST":
+        new_pin = request.form.get("new_pin")
+        confirm_pin = request.form.get("confirm_pin")
+
+        if not new_pin or not confirm_pin:
+            flash("Tafadhali jaza PIN zote mbili.", "warning")
+        elif new_pin != confirm_pin:
+            flash("PIN mpya na uthibitisho havilingani.", "warning")
+        else:
+            hashed = generate_password_hash(new_pin)
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute("UPDATE boss SET password=?, status='ACTIVE' WHERE boss_id=?", (hashed, boss_id))
+            conn.commit()
+            conn.close()
+
+            flash("PIN mpya imewekwa kwa mafanikio. Unaweza ku-login sasa.", "success")
+            return redirect(url_for("boss_login"))
+
+    return render_template("boss_set_new_pin.html")
 
 
 @app.route("/boss_dashboard")
@@ -2067,7 +2167,9 @@ def check_bosses():
     output += "</ul>"
     return output    
 # ================= RUN APP ==================
+# ================= RUN APP ==================
 if __name__ == "__main__":
     import os
-    port = int(os.environ.get("PORT", 5000))  # Render ina-set PORT env variable
+
+    port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)

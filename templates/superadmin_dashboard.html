@@ -57,10 +57,12 @@
                     <a href="{{ url_for('toggle_boss', boss_id=boss.boss_id) }}" class="btn btn-sm btn-warning mb-1">
                         {% if boss.status == 'ACTIVE' %}Deactivate{% else %}Activate{% endif %}
                     </a>
-                    <!-- Reset Password -->
-                    <a href="{{ url_for('superadmin_reset_boss_password', boss_id=boss.boss_id) }}" class="btn btn-sm btn-info mb-1">
-                        Reset Password
-                    </a>
+
+                    <!-- Request PIN Reset (POST) -->
+                    <form method="POST" action="{{ url_for('superadmin_trigger_boss_reset', boss_id=boss.boss_id) }}" style="display:inline;">
+                        <button type="submit" class="btn btn-sm btn-info mb-1">Request PIN Reset</button>
+                    </form>
+
                     <!-- View Customers -->
                     <a href="{{ url_for('superadmin_boss_customers', boss_id=boss.boss_id) }}" class="btn btn-sm btn-primary mb-1">
                         View Customers
