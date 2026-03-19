@@ -11,12 +11,13 @@
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
 
 <style>
+/* --- Body & Containers --- */
 html, body {
     height: 100%;
     margin: 0;
     padding: 0;
     font-family: 'Inter', sans-serif;
-    background: linear-gradient(135deg, #e0f7fa, #fce4ec);
+    background: #f4f6f9; /* light, clean background */
 }
 
 body {
@@ -28,78 +29,107 @@ body {
     flex: 1;
     display: flex;
     flex-direction: column;
-    padding: 20px;
+    padding: 24px;
 }
 
+/* --- Card --- */
 .card {
-    border-radius:12px;
-    box-shadow:0 6px 20px rgba(0,0,0,0.1);
+    border-radius: 14px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.06);
     flex: 1;
     display: flex;
     flex-direction: column;
     padding: 25px;
-    overflow: hidden;
-    background: linear-gradient(145deg, #ffffff, #f8f9fa);
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
 }
 
+/* --- Heading --- */
 h1 {
-    font-weight:700;
-    color:#0d6efd;
-    margin-bottom:20px;
+    font-weight: 600;
+    color: #1e293b; /* dark slate */
+    margin-bottom: 20px;
     text-align: center;
-    text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
 }
 
+/* --- Flash Messages --- */
 .flash {
     padding:12px;
     margin-bottom:15px;
     border-radius:8px;
     font-size:14px;
+    border: 1px solid transparent;
 }
-.success { background-color:#d1e7dd; color:#0f5132; }
-.danger { background-color:#f8d7da; color:#842029; }
-.warning { background-color:#fff3cd; color:#856404; }
 
+.success { 
+    background-color:#ecfdf5; 
+    color:#065f46; 
+    border-color:#a7f3d0;
+}
+.danger { 
+    background-color:#fef2f2; 
+    color:#7f1d1d; 
+    border-color:#fecaca;
+}
+.warning { 
+    background-color:#fffbeb; 
+    color:#78350f; 
+    border-color:#fde68a;
+}
+
+/* --- Table --- */
 .table-responsive {
     flex: 1;
     overflow-y: auto;
 }
 
-.table th {
-    background: linear-gradient(90deg, #0d6efd, #6610f2);
-    color: white;
+.table {
+    border-radius: 10px;
+    overflow: hidden;
 }
 
-.table-hover tbody tr:hover {
-    background-color: rgba(13,110,253,0.08);
+.table th {
+    background: #1e293b; /* dark professional */
+    color: #ffffff;
+    font-weight: 500;
+    font-size: 14px;
 }
 
 .table td {
     vertical-align: middle;
+    font-size: 14px;
 }
 
+.table-hover tbody tr:hover {
+    background-color: #f1f5f9;
+}
+
+/* --- Buttons --- */
 .btn {
-    min-width:140px;
-    transition: all 0.2s;
+    min-width: 140px;
+    transition: all 0.2s ease;
+    border-radius: 8px;
+    font-weight: 500;
 }
 
+/* Primary action */
 .btn-success {
-    background-color: #28a745;
+    background-color: #2563eb;
     border: none;
 }
 .btn-success:hover {
-    background-color: #218838;
+    background-color: #1d4ed8;
 }
 
+/* Secondary */
 .btn-outline-secondary {
-    border-color: #6c757d;
-    color: #6c757d;
+    border-color: #cbd5f5;
+    color: #334155;
 }
 .btn-outline-secondary:hover {
-    background-color: #6c757d;
+    background-color: #334155;
     color: white;
 }
-
 </style>
 </head>
 <body>

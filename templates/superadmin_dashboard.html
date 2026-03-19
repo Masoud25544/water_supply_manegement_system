@@ -26,6 +26,13 @@
       {% endif %}
     {% endwith %}
 
+    <!-- Boss Wapya Button -->
+    <div class="mb-3">
+        <a href="{{ url_for('new_bosses') }}" class="btn btn-dark">
+            👤 Boss Wapya
+        </a>
+    </div>
+
     <!-- Boss Table -->
     <table class="table table-bordered table-striped">
         <thead class="table-dark">
@@ -39,37 +46,43 @@
             </tr>
         </thead>
         <tbody>
-            {% for boss in bosses %}
-            <tr>
-                <td>{{ loop.index }}</td>
-                <td>{{ boss.full_name }}</td>
-                <td>{{ boss.username }}</td>
-                <td>
-                    {% if boss.status == 'ACTIVE' %}
-                        <span class="badge bg-success">ACTIVE</span>
-                    {% else %}
-                        <span class="badge bg-secondary">INACTIVE</span>
-                    {% endif %}
-                </td>
-                <td>{{ boss.trial_end_date }}</td>
-                <td>
-                    <!-- Toggle Status -->
-                    <a href="{{ url_for('toggle_boss', boss_id=boss.boss_id) }}" class="btn btn-sm btn-warning mb-1">
-                        {% if boss.status == 'ACTIVE' %}Deactivate{% else %}Activate{% endif %}
-                    </a>
+            {% if bosses %}
+                {% for boss in bosses %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ boss.full_name }}</td>
+                    <td>{{ boss.username }}</td>
+                    <td>
+                        {% if boss.status == 'ACTIVE' %}
+                            <span class="badge bg-success">ACTIVE</span>
+                        {% else %}
+                            <span class="badge bg-secondary">INACTIVE</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ boss.trial_end_date }}</td>
+                    <td>
+                        <!-- Toggle Status -->
+                        <a href="{{ url_for('toggle_boss', boss_id=boss.boss_id) }}" class="btn btn-sm btn-warning mb-1">
+                            {% if boss.status == 'ACTIVE' %}Deactivate{% else %}Activate{% endif %}
+                        </a>
 
-                    <!-- Request PIN Reset (POST) -->
-                    <form method="POST" action="{{ url_for('superadmin_trigger_boss_reset', boss_id=boss.boss_id) }}" style="display:inline;">
-                        <button type="submit" class="btn btn-sm btn-info mb-1">Request PIN Reset</button>
-                    </form>
+                        <!-- Request PIN Reset (POST) -->
+                        <form method="POST" action="{{ url_for('superadmin_trigger_boss_reset', boss_id=boss.boss_id) }}" style="display:inline;">
+                            <button type="submit" class="btn btn-sm btn-info mb-1">Request PIN Reset</button>
+                        </form>
 
-                    <!-- View Customers -->
-                    <a href="{{ url_for('superadmin_boss_customers', boss_id=boss.boss_id) }}" class="btn btn-sm btn-primary mb-1">
-                        View Customers
-                    </a>
-                </td>
-            </tr>
-            {% endfor %}
+                        <!-- View Customers -->
+                        <a href="{{ url_for('superadmin_boss_customers', boss_id=boss.boss_id) }}" class="btn btn-sm btn-primary mb-1">
+                            View Customers
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="6" class="text-center">Hakuna boss wa kuonyesha au login required ⚠️</td>
+                </tr>
+            {% endif %}
         </tbody>
     </table>
 </div>

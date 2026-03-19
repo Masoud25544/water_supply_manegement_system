@@ -439,6 +439,40 @@ def superadmin_customer_meters(customer_id):
 
     return render_template("superadmin_customer_meters.html", customer=customer, meters=meters)
     
+
+from flask import render_template
+from datetime import datetime
+
+@app.route("/superadmin/boss/new")
+def new_bosses():
+    conn = sqlite3.connect("water_supply.db")
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM boss")
+    bosses = cur.fetchall()
+
+    # Calculate days left na days passed
+    today = datetime.now()
+    boss_list = []
+    for b in bosses:
+        signup = datetime.strptime(b['signup_date'], "%Y-%m-%d %H:%M:%S")
+        trial_end = datetime.strptime(b['trial_end_date'], "%Y-%m-%d %H:%M:%S")
+        days_passed = (today - signup).days
+        days_left = (trial_end - today).days
+        boss_list.append({
+            'boss_id': b['boss_id'],
+            'full_name': b['full_name'],
+            'username': b['username'],
+            'status': b['status'],
+            'signup_date': b['signup_date'],
+            'trial_end_date': b['trial_end_date'],
+            'days_passed': days_passed,
+            'days_left': days_left
+        })
+
+    return render_template("boss_wapya.html", bosses=boss_list)
+
+
 @app.route("/superadmin/boss/<boss_id>/trigger_reset", methods=["POST"])
 def superadmin_trigger_boss_reset(boss_id):
     if "superadmin_id" not in session:
@@ -494,24 +528,36 @@ def boss_signup():
         full_name = request.form.get("full_name")
         username = request.form.get("username")
         password = request.form.get("password")
+
         boss_id = "BOSS-" + str(uuid.uuid4())[:8]
         hashed_pw = generate_password_hash(password)
+
         signup_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         trial_end_date = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
         status = "ACTIVE"
+
         conn = get_db_connection()
         cur = conn.cursor()
+
         try:
             cur.execute("""
                 INSERT INTO boss (boss_id, full_name, username, password, signup_date, trial_end_date, status, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (boss_id, full_name, username, hashed_pw, signup_date, trial_end_date, status, signup_date))
+
             conn.commit()
-            flash("Boss account imeundwa! Sasa unaweza kuingia.", "success")
+
+            session['just_signed_up'] = True
+            session['boss_id'] = boss_id
+
+            # ✅ Hapa ndio tulirekebisha
+            return redirect(url_for("boss_dashboard"))
+
         except sqlite3.IntegrityError:
             flash("Username tayari ipo.", "danger")
+
         conn.close()
-        return redirect(url_for("boss_login"))
+
     return render_template("boss_signup.html")
 
 # ===================== MAIN ======================
@@ -600,7 +646,6 @@ def boss_set_new_pin():
 
     return render_template("boss_set_new_pin.html")
 
-
 @app.route("/boss_dashboard")
 def boss_dashboard():
     if "boss_id" not in session:
@@ -608,6 +653,13 @@ def boss_dashboard():
         return redirect(url_for("boss_login"))
 
     boss_id = session["boss_id"]
+
+    # ✅ ONE-TIME WELCOME MESSAGE
+    show_welcome = False
+    if session.get('just_signed_up'):
+        show_welcome = True
+        session.pop('just_signed_up', None)
+
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
 
@@ -699,7 +751,7 @@ def boss_dashboard():
     )
 
     # -------------------------------
-    # Recent Activity Logs (5 za mwisho) kwa boss pekee
+    # Recent Activity Logs (5 za mwisho)
     # -------------------------------
     cursor = conn.cursor()
     cursor.execute("""
@@ -725,7 +777,8 @@ def boss_dashboard():
         total_unpaid_amount=total_unpaid_amount,
         total_payments=total_payments,
         skipped_meters=skipped_meters,
-        recent_logs=recent_logs       # ✅ Tumiongeza recent activity pekee kwa boss
+        recent_logs=recent_logs,
+        show_welcome=show_welcome   # ✅ HII NDIO TUMEONGEZA TU
     )
 @app.route("/boss/activity_logs")
 def boss_activity_logs():

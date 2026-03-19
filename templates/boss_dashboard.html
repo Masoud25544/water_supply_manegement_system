@@ -75,6 +75,25 @@
             </div>
         </div>
 
+        <!-- ✅ ONE-TIME WELCOME MESSAGE -->
+        {% if show_welcome %}
+        <div class="alert alert-success alert-dismissible fade show">
+        <h5> karibu sana</h5>
+            Karibu kwenye dashboard! Tumefurahia kukuona hapa.
+            
+            mfumonhuu umejengwa  na masoud tech solution 
+            mahukhususi ili kukusaidia kuratibu
+            na kusimamia biashara ya maji 
+            
+            •kusoma meter kwa urahisi
+            •kupokea malipo ya bills kwa urahisi
+            •kufuatilia madeni kwa usahihi
+            
+            
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        {% endif %}
+
         {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
             {% for category, message in messages %}

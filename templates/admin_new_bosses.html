@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Boss Wapya</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+
+<div class="container mt-4">
+
+    <h4 class="mb-4">📊 Boss Wapya na Trial Status</h4>
+
+    <table class="table table-hover table-bordered">
+        <thead class="table-dark">
+            <tr>
+                <th>Jina</th>
+                <th>Tarehe ya Kujiunga</th>
+                <th>Siku Zilizotumika</th>
+                <th>Siku Zilizobaki</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+
+        <tbody>
+        {% for b in bosses %}
+            <tr>
+                <td>{{ b.name }}</td>
+                <td>{{ b.signup_date }}</td>
+                <td>{{ b.days_passed }}</td>
+
+                <td>
+                    {% if b.days_left > 0 %}
+                        <span class="badge bg-success">
+                            {{ b.days_left }} siku
+                        </span>
+                    {% else %}
+                        <span class="badge bg-danger">
+                            Imeisha
+                        </span>
+                    {% endif %}
+                </td>
+
+                <td>
+                    {% if b.status == 'ACTIVE' %}
+                        <span class="badge bg-primary">ACTIVE</span>
+                    {% else %}
+                        <span class="badge bg-secondary">{{ b.status }}</span>
+                    {% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+
+    </table>
+
+</div>
+
+</body>
+</html>
