@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="sw">
+<head>
+<meta charset="UTF-8">
+<title>Matangazo</title>
+</head>
+<body>
+
+<h2>Matangazo kutoka kwa Super Admin</h2>
+
+{% for a in announcements %}
+    <div style="border:1px solid #ccc; padding:10px; margin-bottom:10px;">
+        <h3>{{ a.title }}</h3>
+        <p>{{ a.message }}</p>
+        <small>{{ a.created_at }}</small>
+    </div>
+{% else %}
+    <p>Hakuna matangazo kwa sasa</p>
+{% endfor %}
+
+</body>
+</html>

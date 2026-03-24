@@ -9,9 +9,11 @@
 
 <div class="container py-4">
 
+    <!-- HEADER + BACK BUTTON -->
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h3 class="fw-bold">📟 Meters za {{ customer.full_name }}</h3>
-        <a href="{{ url_for('superadmin_boss_customers') }}" class="btn btn-secondary">⬅ Back</a>
+        <!-- ✅ Boss ID added so Back button works -->
+        <a href="{{ url_for('superadmin_boss_customers', boss_id=boss_id) }}" class="btn btn-secondary">⬅ Back</a>
     </div>
 
     {% if meters %}
@@ -29,11 +31,11 @@
                         </thead>
                         <tbody>
                             {% for meter in meters %}
-                            <tr>
-                                <td class="text-center">{{ loop.index }}</td>
+                            <tr class="text-center">
+                                <td>{{ loop.index }}</td>
                                 <td><span class="badge bg-info text-dark">{{ meter.meter_number }}</span></td>
-                                <td class="text-center">{{ meter.created_at or '-' }}</td>
-                                <td class="text-center">
+                                <td>{{ meter.created_at or '-' }}</td>
+                                <td>
                                     {% if meter.status == 'ACTIVE' %}
                                         <span class="badge bg-success">ACTIVE</span>
                                     {% else %}

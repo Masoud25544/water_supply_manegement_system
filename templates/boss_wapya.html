@@ -54,13 +54,17 @@
                 <td>
                     {% if b.days_left > 0 %}
                         <span class="badge bg-success">{{ b.days_left }} siku</span>
-                    {% else %}
+                    {% elif b.days_left == 0 and b.status == 'EXPIRED' %}
                         <span class="badge bg-danger">Imezidi</span>
+                    {% else %}
+                        <span class="badge bg-warning">{{ b.days_left }} siku</span>
                     {% endif %}
                 </td>
                 <td>
                     {% if b.status == 'ACTIVE' %}
                         <span class="badge bg-primary">ACTIVE</span>
+                    {% elif b.status == 'EXPIRED' %}
+                        <span class="badge bg-danger">EXPIRED</span>
                     {% else %}
                         <span class="badge bg-secondary">{{ b.status }}</span>
                     {% endif %}

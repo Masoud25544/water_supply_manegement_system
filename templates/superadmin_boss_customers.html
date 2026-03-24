@@ -4,9 +4,14 @@
     <meta charset="UTF-8">
     <title>Super Admin - Wateja wa Boss</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f8f9fa; }
+        .badge { font-size: 0.9rem; }
+        table th, table td { vertical-align: middle !important; }
+        .table-hover tbody tr:hover { background-color: #e9ecef; }
+    </style>
 </head>
-
-<body class="bg-light">
+<body>
 
 <div class="container py-4">
 
@@ -16,99 +21,77 @@
         <a href="{{ url_for('superadmin_dashboard') }}" class="btn btn-outline-dark">⬅ Dashboard</a>
     </div>
 
-    <!-- FORM -->
+    <!-- OPTIONAL Boss Dropdown (reference only) -->
     <div class="card shadow-sm border-0 mb-4">
         <div class="card-body">
-            <form method="POST" action="{{ url_for('superadmin_boss_customers') }}">
-                <div class="row g-2 align-items-end">
-                    
-                    <div class="col-md-8">
-                        <label class="form-label fw-semibold">Chagua Boss</label>
-                        <select name="boss_id" class="form-select" required>
-                            <option value="">-- Select Boss --</option>
-                            {% for boss in bosses %}
-                                <option value="{{ boss.boss_id }}" {% if boss.boss_id == selected_boss_id %}selected{% endif %}>
-                                    {{ boss.full_name }}
-                                </option>
-                            {% endfor %}
-                        </select>
-                    </div>
-
-                    <div class="col-md-4">
-                        <button class="btn btn-primary w-100">🔍 Onyesha Wateja</button>
-                    </div>
-
-                </div>
-            </form>
+            <label class="form-label fw-semibold">Boss Huyu:</label>
+            <select class="form-select" disabled>
+                {% for boss in bosses %}
+                    {% if boss.boss_id == selected_boss_id %}
+                        <option selected>{{ boss.full_name }}</option>
+                    {% endif %}
+                {% endfor %}
+            </select>
         </div>
     </div>
 
-    <!-- RESULTS -->
-    {% if selected_boss_id %}
-        <div class="card shadow-sm border-0">
-            <div class="card-body">
+    <!-- CUSTOMERS TABLE -->
+    <div class="card shadow-sm border-0">
+        <div class="card-body">
+            <h5 class="mb-3 text-secondary">📋 Orodha ya Wateja</h5>
 
-                <h5 class="mb-3 text-secondary">📋 Orodha ya Wateja</h5>
+            {% if customers %}
+                <div class="table-responsive">
+                    <table class="table table-hover table-bordered align-middle">
+                        <thead class="table-dark text-center">
+                            <tr>
+                                <th>#</th>
+                                <th>Jina</th>
+                                <th>Simu</th>
+                                <th>Eneo</th>
+                                <th>Nyumba</th>
+                                <th>Meters</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for customer in customers %}
+                            <tr class="text-center">
+                                <td>{{ loop.index }}</td>
+                                <td>{{ customer.full_name }}</td>
+                                <td>{{ customer.phone or '-' }}</td>
+                                <td>{{ customer.area or '-' }}</td>
+                                <td>{{ customer.house_number or '-' }}</td>
 
-                {% if customers %}
-                    <div class="table-responsive">
-                        <table class="table table-hover table-bordered align-middle">
+                                <!-- VIEW METERS BUTTON -->
+                                <td>
+                                    <a href="{{ url_for('superadmin_customer_meters', customer_id=customer.customer_id) }}" 
+                                       class="btn btn-sm btn-outline-primary">
+                                        🔍 View Meters
+                                    </a>
+                                </td>
 
-                            <thead class="table-dark text-center">
-                                <tr>
-                                    <th>#</th>
-                                    <th>Jina</th>
-                                    <th>Simu</th>
-                                    <th>Eneo</th>
-                                    <th>Nyumba</th>
-                                    <th>Meters</th> <!-- BADILIKO HAPA -->
-                                    <th>Status</th>
-                                </tr>
-                            </thead>
+                                <!-- STATUS -->
+                                <td>
+                                    {% if customer.status == 'ACTIVE' %}
+                                        <span class="badge bg-success">ACTIVE</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">{{ customer.status }}</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <div class="alert alert-warning text-center">
+                    Hakuna wateja kwa boss huyu.
+                </div>
+            {% endif %}
 
-                            <tbody>
-                                {% for customer in customers %}
-                                <tr>
-                                    <td>{{ loop.index }}</td>
-                                    <td>{{ customer.full_name }}</td>
-                                    <td>{{ customer.phone or '-' }}</td>
-                                    <td>{{ customer.area or '-' }}</td>
-                                    <td>{{ customer.house_number or '-' }}</td>
-
-                                    <!-- 🔥 VIEW METERS BUTTON -->
-                                    <td class="text-center">
-                                        <a href="{{ url_for('superadmin_customer_meters', customer_id=customer.customer_id) }}" 
-                                           class="btn btn-sm btn-outline-primary">
-                                            🔍 View Meters
-                                        </a>
-                                    </td>
-
-                                    <!-- STATUS -->
-                                    <td class="text-center">
-                                        {% if customer.status == 'ACTIVE' %}
-                                            <span class="badge bg-success">ACTIVE</span>
-                                        {% else %}
-                                            <span class="badge bg-secondary">
-                                                {{ customer.status }}
-                                            </span>
-                                        {% endif %}
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-
-                        </table>
-                    </div>
-
-                {% else %}
-                    <div class="alert alert-warning">
-                        Hakuna wateja kwa boss huyu.
-                    </div>
-                {% endif %}
-
-            </div>
         </div>
-    {% endif %}
+    </div>
 
 </div>
 
