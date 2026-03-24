@@ -2316,45 +2316,57 @@ def boss_monthly_report():
             
 @app.route("/search_customer", methods=["GET","POST"])
 def search_customer():
+    if "boss_id" not in session:
+        flash("Tafadhali ingia kwanza", "danger")
+        return redirect(url_for("boss_login"))
+
+    boss_id = session["boss_id"]
+
     if request.method == "POST":
-
         name = request.form.get("customer_name", "").strip()
-
         if not name:
             flash("Andika jina la mteja kwanza", "warning")
             return redirect(url_for("search_customer"))
-
-        # Pata boss_id kutoka session
-        boss_id = session.get("boss_id")
-        if not boss_id:
-            flash("Tafadhali ingia kwanza", "danger")
-            return redirect(url_for("boss_login"))
 
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
 
-        # 🔹 Case-insensitive search, boss anaona wateja wake tu
+        # 🔹 JOIN customers + meters + bills
         cur.execute("""
-            SELECT * FROM customers
-            WHERE full_name = ? COLLATE NOCASE
-              AND boss_id = ?
-        """, (name, boss_id))
+            SELECT 
+                c.customer_id,
+                c.full_name,
+                c.phone,
+                m.meter_number,
+                IFNULL(SUM(b.amount),0) AS balance
+            FROM customers c
+            LEFT JOIN meters m ON c.customer_id = m.customer_id
+            LEFT JOIN bills b ON m.meter_id = b.meter_id AND b.status='UNPAID'
+            WHERE c.full_name LIKE ? AND c.boss_id = ?
+            GROUP BY c.customer_id, m.meter_number
+        """, ('%' + name + '%', boss_id))
 
-        customer = cur.fetchone()
+        customers = cur.fetchall()
         conn.close()
 
-        if customer:
-            return redirect(url_for(
-                "customer_details",
-                customer_id=customer["customer_id"]
-            ))
-        else:
+        if not customers:
             flash("Mteja hajapatikana", "danger")
             return redirect(url_for("search_customer"))
 
-    # GET request
+        # 🔹 Kama customer mmoja → redirect moja kwa moja
+        if len(customers) == 1:
+            return redirect(url_for(
+                "customer_details",
+                customer_id=customers[0]["customer_id"]
+            ))
+
+        # 🔹 Wateja wengi → show table ya results
+        return render_template("search_results.html", customers=customers)
+
+    # GET request → show search form
     return render_template("search_customer.html")
+   
 
 
 @app.route("/boss/confirm_delete_customer/<customer_id>", methods=["GET", "POST"])

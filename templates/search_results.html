@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Matokeo ya Utafutaji</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<!-- Bootstrap -->
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+
+<style>
+/* Background ya body na font */
+body {
+    background: linear-gradient(135deg,#1c1c1c,#2c3e50,#34495e);
+    min-height:100vh;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    padding-top:40px;
+    color: #fff;
+}
+
+/* Card */
+.card-custom {
+    max-width: 950px;
+    margin: auto;
+    border-radius: 20px;
+    box-shadow: 0 16px 40px rgba(0,0,0,0.5);
+    background: #f8f9fa;
+    padding: 25px;
+}
+
+/* Header ya card */
+.card-header-custom {
+    background: linear-gradient(90deg,#007bff,#00c6ff);
+    color:#fff;
+    padding: 25px;
+    text-align: center;
+    border-radius: 15px 15px 0 0;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+}
+.card-header-custom h3 {
+    margin:0;
+    font-weight: 600;
+}
+
+/* Table styling */
+.table th, .table td {
+    vertical-align: middle;
+    text-align: center;
+}
+.table-hover tbody tr:hover {
+    background: #e1f5fe;
+    color: #000;
+    transition: 0.2s;
+}
+.table thead {
+    background: linear-gradient(90deg,#0062cc,#00c6ff);
+    color:#fff;
+    font-weight: 500;
+}
+.table td a.btn {
+    border-radius: 8px;
+    font-weight: 500;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+    transition: 0.2s;
+}
+.table td a.btn:hover {
+    transform: translateY(-2px);
+}
+
+/* Back button */
+.btn-back {
+    border-radius: 12px;
+    font-weight: 500;
+    padding: 10px 25px;
+    background: #343a40;
+    color: #fff;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    transition: 0.2s;
+}
+.btn-back:hover {
+    background: #495057;
+    transform: translateY(-2px);
+}
+
+/* Responsive table */
+@media (max-width: 768px) {
+    .table th, .table td {
+        font-size: 14px;
+        padding: 10px;
+    }
+}
+</style>
+
+</head>
+<body>
+
+<div class="card-custom">
+
+<div class="card-header-custom">
+    <h3>Matokeo ya Utafutaji</h3>
+</div>
+
+<div class="card-body">
+
+<table class="table table-bordered table-hover">
+    <thead>
+        <tr>
+            <th>Jina</th>
+            <th>Simu</th>
+            <th>Meter</th>
+            <th>Deni</th>
+            <th>Action</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for customer in customers %}
+        <tr>
+            <td>{{ customer.full_name }}</td>
+            <td>{{ customer.phone }}</td>
+            <td>{{ customer.meter_number }}</td>
+            <td>
+                {% if customer.balance > 0 %}
+                    Tsh {{ "{:,.2f}".format(customer.balance) }}
+                {% else %}
+                    Hana deni
+                {% endif %}
+            </td>
+            <td>
+                <a href="{{ url_for('customer_details', customer_id=customer.customer_id) }}" class="btn btn-sm btn-primary">
+                    Angalia
+                </a>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<div class="text-center mt-4">
+    <button class="btn btn-back" onclick="window.history.back();">
+        <i class="bi bi-arrow-left"></i> Rudi
+    </button>
+</div>
+
+</div>
+</div>
+
+</body>
+</html>

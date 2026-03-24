@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Tafuta Mteja</title>
+<title>Chagua Mteja</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 
 <!-- Bootstrap -->
@@ -14,65 +14,32 @@
 <style>
 body{
     background: linear-gradient(135deg,#0f2027,#203a43,#2c5364);
+    font-family: Arial, sans-serif;
     min-height:100vh;
     display:flex;
     align-items:center;
-    font-family: Arial, sans-serif;
+    justify-content:center;
+    padding:20px;
 }
 
-.search-card{
-    max-width:720px;
-    margin:auto;
+.results-card{
+    width:100%;
+    max-width:900px;
+    background:#fff;
     border-radius:15px;
     box-shadow:0 12px 30px rgba(0,0,0,0.3);
     overflow:hidden;
+    padding:30px;
 }
 
-/* Header ya card */
-.card-header-custom{
-    background:linear-gradient(90deg,#007bff,#00c6ff);
-    color:white;
+.results-card h3{
     text-align:center;
-    padding:25px;
-}
-
-.card-header-custom h3{
-    margin:0;
+    margin-bottom:20px;
     font-weight:600;
+    color:#007bff;
 }
 
-/* Body ya card */
-.card-body-custom{
-    background:#ffffff;
-    padding:40px;
-}
-
-.system-title{
-    font-size:14px;
-    opacity:0.9;
-}
-
-/* Input */
-.form-control{
-    height:50px;
-    border-radius:8px;
-}
-
-/* Search button */
-.btn-search{
-    height:50px;
-    border-radius:8px;
-    font-weight:500;
-}
-
-/* Dashboard button */
-.dashboard-btn{
-    border-radius:8px;
-}
-
-/* Table ya matokeo */
 .table-results{
-    margin-top:20px;
     border-radius:10px;
     overflow:hidden;
 }
@@ -85,55 +52,18 @@ body{
 .table-results td{
     vertical-align: middle;
 }
+
+.btn-back{
+    margin-top:20px;
+}
 </style>
 </head>
-
 <body>
 
-<div class="container">
+<div class="results-card">
 
-<div class="search-card">
+<h3>Matokeo ya Utafutaji</h3>
 
-<div class="card-header-custom">
-
-<i class="bi bi-search fs-3"></i>
-
-<h3>Tafuta Mteja</h3>
-
-<div class="system-title">
-Water Supply Management System
-</div>
-
-</div>
-
-<div class="card-body-custom">
-
-<!-- FORM -->
-<form method="POST">
-
-<div class="input-group mb-4">
-
-<span class="input-group-text">
-<i class="bi bi-person"></i>
-</span>
-
-<input
-type="text"
-name="customer_name"
-class="form-control"
-placeholder="Tafuta kwa jina, simu au meter..."
-required
->
-
-<button class="btn btn-primary btn-search">
-<i class="bi bi-search"></i> Tafuta
-</button>
-
-</div>
-
-</form>
-
-<!-- RESULTS -->
 {% if customers %}
 <div class="table-responsive table-results">
 <table class="table table-hover table-bordered">
@@ -169,16 +99,14 @@ required
 </tbody>
 </table>
 </div>
+{% else %}
+<p class="text-center text-danger fw-bold">Hakuna mteja aliyepatikana.</p>
 {% endif %}
 
-<div class="text-center mt-3">
-<a href="{{ url_for('boss_dashboard') }}" class="btn btn-dark dashboard-btn">
-<i class="bi bi-arrow-left"></i> Rudi Dashboard
+<div class="text-center">
+<a href="{{ url_for('search_customer') }}" class="btn btn-dark btn-back">
+<i class="bi bi-arrow-left"></i> Rudi Tafuta Mteja
 </a>
-</div>
-
-</div>
-
 </div>
 
 </div>
