@@ -1,0 +1,73 @@
+<!-- templates/receive_subscription_payment.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Lipa Subscription</title>
+    
+    <!-- Bootstrap CSS CDN: Inatoa styling ya haraka, responsive na components -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Bootstrap Icons CDN: Inatoa icons zinazotumika kwenye buttons na headings -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+    
+    <style>
+        /* Styling ya body: Center vertical & horizontal, set background color */
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background-color: #f8f9fa;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh; /* Full viewport height */
+        }
+
+        /* Styling ya card container: padding, border-radius, shadow na text-align */
+        .card {
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            text-align: center;
+            width: 400px; /* Fixed width for consistent layout */
+        }
+
+        /* Styling ya buttons: spacing na minimum width */
+        .btn { 
+            margin: 5px 0; 
+            min-width: 150px; 
+        }
+    </style>
+</head>
+<body>
+    <!-- Card container inayo center na kuonyesha taarifa za subscription -->
+    <div class="card">
+        <!-- Heading na icon: inatoa visual cue ya malipo -->
+        <h2 class="mb-3">
+            <i class="bi bi-credit-card-fill text-success"></i> Lipa Subscription
+        </h2>
+
+        <!-- Maelezo ya user: warning message kuhusu subscription expired -->
+        <p>⚠️ Muda wako wa kutumia mfumo umeisha. Lipa sasa ili kuendelea kutumia dashboard.</p>
+
+        <!--
+            Button ya "Lipa Sasa"
+            - Inatumia Flask url_for kupeleka boss_id kwenye route ya receive_subscription_payment
+            - class="btn btn-success btn-lg w-100 mb-2": styling ya Bootstrap
+            - Icon inatoa visual cue ya wallet
+        -->
+        <a href="{{ url_for('receive_subscription_payment', boss_id=boss_id) }}" class="btn btn-success btn-lg w-100 mb-2">
+            <i class="bi bi-wallet2"></i> Lipa Sasa
+        </a>
+
+        <!--
+            Button ya Logout
+            - Inapeleka user kwenye route ya logout
+            - class="btn btn-secondary w-100": styling ya Bootstrap
+            - Icon inatoa visual cue ya exit
+        -->
+        <a href="{{ url_for('boss_logout') }}" class="btn btn-secondary w-100">
+            <i class="bi bi-box-arrow-right"></i> Logout
+        </a>
+    </div>
+</body>
+</html>

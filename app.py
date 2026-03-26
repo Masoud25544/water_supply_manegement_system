@@ -16,6 +16,9 @@ app = Flask(__name__)
 app.secret_key = "supersecretkey"
 DB_PATH = "water_supply.db"
 
+
+
+
 # ================================
 # DATABASE SETUP FUNCTION
 # ================================
@@ -60,11 +63,9 @@ def init_db():
         """)
         # 🔹 Safe add created_by column (if it does not exist)
         try:
-            
             cur.execute("ALTER TABLE announcements ADD COLUMN created_by TEXT;")
         except sqlite3.OperationalError:
-            # column already exists, hakuna tatizo
-            pass
+            pass  # column already exists
 
         # =====================================================
         # ANNOUNCEMENT READS
@@ -102,6 +103,12 @@ def init_db():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
         """)
+
+        # 🔹 SAFE ADD subscription_end_date COLUMN (HAIVURUGI CHOCHOTE)
+        try:
+            cur.execute("ALTER TABLE boss ADD COLUMN subscription_end_date TEXT;")
+        except sqlite3.OperationalError:
+            pass  # column tayari ipo
 
         # =====================================================
         # STAFF
@@ -311,6 +318,8 @@ def init_db():
 
 # Run DB initialization when app starts
 init_db()
+
+
 # ================================
 # INIT DATABASE ROUTE (kwa testing)
 # ================================
@@ -395,19 +404,43 @@ def superadmin_login():
 @app.route("/superadmin/dashboard")
 def superadmin_dashboard():
     if "superadmin_id" not in session:
-        print("No session key found!")   # Debug
         return redirect(url_for("superadmin_login"))
 
-    print("Session keys:", session)    # Debug: ona superadmin_id ipo
-
     conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
     cur = conn.cursor()
-    cur.execute("SELECT boss_id, full_name, username, status, trial_end_date FROM boss ORDER BY full_name")
+    cur.execute("""
+        SELECT boss_id, full_name, username, status, signup_date, trial_end_date
+        FROM boss
+        ORDER BY full_name
+    """)
     bosses = cur.fetchall()
-    print("Bosses fetched:", bosses)    # Debug: ona kama query inarudisha data
     conn.close()
 
-    return render_template("superadmin_dashboard.html", bosses=bosses)
+    # Calculate days passed, days left
+    today = datetime.now().date()
+    boss_list = []
+
+    for b in bosses:
+        signup = datetime.strptime(b['signup_date'], "%Y-%m-%d %H:%M:%S").date()
+        trial_end = datetime.strptime(b['trial_end_date'], "%Y-%m-%d %H:%M:%S").date()
+
+        days_passed = (today - signup).days
+        days_left = (trial_end - today).days
+
+        boss_list.append({
+            'boss_id': b['boss_id'],
+            'full_name': b['full_name'],
+            'username': b['username'],
+            'status': b['status'],  # ✅ status halisi kutoka DB
+            'signup_date': b['signup_date'],
+            'trial_end_date': b['trial_end_date'],
+            'days_passed': days_passed,
+            'days_left': max(days_left, 0),
+            'is_expired': today > trial_end  # ✅ mpya kwa ajili ya UI
+        })
+
+    return render_template("superadmin_dashboard.html", bosses=boss_list)
     
     
 @app.route("/super_admin/announcement", methods=["GET", "POST"])
@@ -481,6 +514,46 @@ def superadmin_boss_customers(boss_id):
     )
     
 
+
+def check_subscription(boss_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("SELECT subscription_end_date FROM boss WHERE boss_id = ?", (boss_id,))
+    boss = cur.fetchone()
+
+    conn.close()
+
+    if boss:
+        sub_end_str = boss["subscription_end_date"]
+        if not sub_end_str:
+            # Hakuna subscription imewekwa → acha kuendelea, au weka False
+            return False
+
+        try:
+            end_date = datetime.strptime(sub_end_str, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            # Ikiwa date iko mbovu au haiko sawa format
+            return False
+
+        if datetime.now() > end_date:
+            return False  # muda umeisha
+
+    else:
+        return False  # boss haipo
+
+    return True
+    
+    
+  
+@app.route("/subscription_payment")
+def subscription_payment():
+    if "boss_id" not in session:
+        flash("Tafadhali ingia kwanza", "danger")
+        return redirect(url_for("boss_login"))
+    boss_id = session["boss_id"]
+    return render_template("subscription_payment.html", boss_id=boss_id)
+
 @app.route("/superadmin/customer/<customer_id>/meters")
 def superadmin_customer_meters(customer_id):
     # Hakikisha superadmin ame-login
@@ -518,12 +591,14 @@ def new_bosses():
     conn = sqlite3.connect("water_supply.db")
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
-    cur.execute("SELECT * FROM boss")
+    
+    # Chagua bosses wote
+    cur.execute("SELECT * FROM boss ORDER BY signup_date ASC")
     bosses = cur.fetchall()
 
-    # Calculate days left na days passed
     today = datetime.now().date()  # Tumia date tu
     boss_list = []
+
     for b in bosses:
         signup = datetime.strptime(b['signup_date'], "%Y-%m-%d %H:%M:%S").date()
         trial_end = datetime.strptime(b['trial_end_date'], "%Y-%m-%d %H:%M:%S").date()
@@ -532,9 +607,13 @@ def new_bosses():
         days_left = (trial_end - today).days
 
         # Live status calculation
-        status = "EXPIRED" if today > trial_end else b['status']
+        if b['status'] == "RESET_PENDING":
+            status = "RESET_PENDING"
+        elif today > trial_end:
+            status = "EXPIRED"
+        else:
+            status = b['status']
 
-        # Ensure days_left non-negative for display
         display_days_left = max(days_left, 0)
 
         boss_list.append({
@@ -548,8 +627,8 @@ def new_bosses():
             'days_left': display_days_left
         })
 
+    conn.close()
     return render_template("boss_wapya.html", bosses=boss_list)
-    
     
     
 
@@ -583,28 +662,48 @@ def superadmin_trigger_boss_reset(boss_id):
 def toggle_boss(boss_id):
     conn = get_db_connection()
     cur = conn.cursor()
+    now = datetime.now()
+
     # Get current status
     cur.execute("SELECT status FROM boss WHERE boss_id=?", (boss_id,))
     boss = cur.fetchone()
 
+    if not boss:
+        flash("Boss haipo", "danger")
+        return redirect(url_for("superadmin_dashboard"))
+
     # Toggle logic
-    if boss and boss["status"] == "ACTIVE":
-        cur.execute("UPDATE boss SET status='INACTIVE' WHERE boss_id=?", (boss_id,))
+    if boss["status"] == "ACTIVE":
+        # Disable boss
+        cur.execute("UPDATE boss SET status='INACTIVE', subscription_end_date=NULL WHERE boss_id=?", (boss_id,))
     else:
-        cur.execute("UPDATE boss SET status='ACTIVE' WHERE boss_id=?", (boss_id,))
+        # Enable boss and set subscription_end_date
+        subscription_end = now + timedelta(minutes=3)  # testing duration
+        cur.execute("""
+            UPDATE boss
+            SET status='ACTIVE', subscription_end_date=?
+            WHERE boss_id=?
+        """, (subscription_end.strftime("%Y-%m-%d %H:%M:%S"), boss_id))
 
     conn.commit()
     conn.close()
     flash("Boss status updated.", "success")
     return redirect(url_for("superadmin_dashboard"))
     
+      
 @app.route("/superadmin/logout")
 def superadmin_logout():
     session.pop("superadmin_id", None)
     flash("Umetoka kwenye mfumo", "info")
-    return redirect(url_for("superadmin_login"))    
+    return redirect(url_for("superadmin_login"))                
+                    
+                            
 
-# ================= BOSS SIGNUP ROUTE ==================
+from datetime import datetime, timedelta
+
+
+
+
 @app.route("/boss/signup", methods=["GET", "POST"])
 def boss_signup():
     if request.method == "POST":
@@ -615,105 +714,184 @@ def boss_signup():
         boss_id = "BOSS-" + str(uuid.uuid4())[:8]
         hashed_pw = generate_password_hash(password)
 
-        signup_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        trial_end_date = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
-        status = "ACTIVE"
+        now = datetime.now()
+
+        signup_date = now.strftime("%Y-%m-%d %H:%M:%S")
+        # ✅ Trial ya dakika 2 kwa testing
+        trial_end_date = (now + timedelta(minutes=2)).strftime("%Y-%m-%d %H:%M:%S")
+
+        # ✅ HII NDIO MUHIMU
+        status = "TRIAL"
 
         conn = get_db_connection()
         cur = conn.cursor()
 
         try:
             cur.execute("""
-                INSERT INTO boss (boss_id, full_name, username, password, signup_date, trial_end_date, status, created_at)
+                INSERT INTO boss (
+                    boss_id, full_name, username, password,
+                    signup_date, trial_end_date, status, created_at
+                )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (boss_id, full_name, username, hashed_pw, signup_date, trial_end_date, status, signup_date))
+            """, (
+                boss_id, full_name, username, hashed_pw,
+                signup_date, trial_end_date, status, signup_date
+            ))
 
             conn.commit()
 
             session['just_signed_up'] = True
             session['boss_id'] = boss_id
 
-            # ✅ Hapa ndio tulirekebisha
             return redirect(url_for("boss_dashboard"))
 
         except sqlite3.IntegrityError:
             flash("Username tayari ipo.", "danger")
 
-        conn.close()
+        finally:
+            conn.close()
 
     return render_template("boss_signup.html")
 
-# ===================== MAIN ======================
 
 
 
 
+
+from datetime import datetime
 @app.route("/boss/login", methods=["GET", "POST"])
 def boss_login():
+    """
+    🔹 Boss Login Route
+    Hii route inashughulikia:
+    1️⃣ Login ya boss wa system
+    2️⃣ Auto-check na update ya TRIAL na subscription expiry
+    3️⃣ Block account ikiwa imefungwa
+    4️⃣ Handle RESET_PENDING temporary passwords
+    5️⃣ Initialize session na announcements
+    """
     if request.method == "POST":
         username = request.form.get("username")
         password = request.form.get("password")
 
+        # ===============================
+        # 🔹 Database connection
+        # ===============================
         conn = get_db_connection()
         cur = conn.cursor()
+
+        # 🔹 Fetch boss by username
         cur.execute("SELECT * FROM boss WHERE username=?", (username,))
         boss = cur.fetchone()
 
-        if boss:
-            # 🔹 RESET_PENDING: check temporary password
-            if boss["status"] == "RESET_PENDING":
-                if check_password_hash(boss["password"], password):
-                    session.clear()
-                    session["boss_id"] = boss["boss_id"]
-                    flash("Tafadhali weka PIN mpya.", "warning")
-                    conn.close()
-                    return redirect(url_for("boss_set_new_pin"))
-                else:
-                    flash("Temporary password sio sahihi.", "danger")
-                    conn.close()
-                    return redirect(url_for("boss_login"))
+        if not boss:
+            conn.close()
+            flash("Username au password sio sahihi.", "danger")
+            return redirect(url_for("boss_login"))
 
-            # 🔹 Normal login
+        boss = dict(boss)
+        now = datetime.now()
+
+        # ===============================
+        # 🔹 HANDLE RESET_PENDING STATUS
+        # ===============================
+        if boss["status"] == "RESET_PENDING":
             if check_password_hash(boss["password"], password):
-                now = datetime.now()
-                trial_end = datetime.strptime(boss["trial_end_date"], "%Y-%m-%d %H:%M:%S")
-                if now > trial_end:
-                    cur.execute("UPDATE boss SET status=? WHERE boss_id=?", ("INACTIVE", boss["boss_id"]))
-                    conn.commit()
-
                 session.clear()
                 session["boss_id"] = boss["boss_id"]
-                session["boss_status"] = boss["status"]
-                session["boss_name"] = boss["full_name"]
-
-                # =====================================================
-                # 🔹 Chunguza tangazo la mwisho (latest announcement)
-                # =====================================================
-                cur.execute("""
-                    SELECT * FROM announcements
-                    ORDER BY created_at DESC
-                    LIMIT 1
-                """)
-                announcement = cur.fetchone()
-                if announcement:
-                    session["announcement_title"] = announcement["title"]
-                    session["announcement_message"] = announcement["message"]
-                else:
-                    session.pop("announcement_title", None)
-                    session.pop("announcement_message", None)
-
                 conn.close()
+                flash("Tafadhali weka PIN mpya.", "warning")
+                return redirect(url_for("boss_set_new_pin"))
+            else:
+                conn.close()
+                flash("Temporary password sio sahihi.", "danger")
+                return redirect(url_for("boss_login"))
 
-                if boss["status"] == "INACTIVE":
-                    flash("Account yako ni INACTIVE.", "warning")
-                else:
-                    flash(f"Karibu, {boss['full_name']}!", "success")
+        # ===============================
+        # 🔹 PASSWORD VALIDATION
+        # ===============================
+        if not check_password_hash(boss["password"], password):
+            conn.close()
+            flash("Username au password sio sahihi.", "danger")
+            return redirect(url_for("boss_login"))
 
-                return redirect(url_for("boss_dashboard"))
+        # ===============================
+        # 🔹 PARSE trial_end_date SAFELY
+        # ===============================
+        trial_end = boss.get("trial_end_date")
+        try:
+            if trial_end and isinstance(trial_end, str):
+                trial_end = datetime.strptime(trial_end, "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            trial_end = None
+
+        # 🔹 AUTO-EXPIRE TRIAL
+        if boss["status"] == "TRIAL" and trial_end and now > trial_end:
+            cur.execute(
+                "UPDATE boss SET status=? WHERE boss_id=?",
+                ("INACTIVE", boss["boss_id"])
+            )
+            conn.commit()
+            boss["status"] = "INACTIVE"
+
+        # ===============================
+        # 🔹 PARSE subscription_end_date SAFELY
+        # ===============================
+        sub_end = boss.get("subscription_end_date")
+        try:
+            if sub_end and isinstance(sub_end, str):
+                sub_end = datetime.strptime(sub_end, "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            sub_end = None
+
+        # 🔹 AUTO-EXPIRE CHECK (subscription only)
+        if sub_end and now > sub_end and boss["status"] == "ACTIVE":
+            cur.execute(
+                "UPDATE boss SET status=? WHERE boss_id=?",
+                ("INACTIVE", boss["boss_id"])
+            )
+            conn.commit()
+            boss["status"] = "INACTIVE"
+
+        # ===============================
+        # 🔹 BLOCK LOGIN IF INACTIVE
+        # ===============================
+        if boss["status"] == "INACTIVE":
+            conn.close()
+            flash("Account yako imefungwa. Tafadhali lipa kuendelea.", "danger")
+            return redirect(url_for("boss_login"))
+
+        # ===============================
+        # 🔹 INITIALIZE SESSION
+        # ===============================
+        session.clear()
+        session["boss_id"] = boss["boss_id"]
+        session["boss_status"] = boss["status"]
+        session["boss_name"] = boss["full_name"]
+
+        # ===============================
+        # 🔹 FETCH LATEST ANNOUNCEMENT
+        # ===============================
+        cur.execute("""
+            SELECT * FROM announcements
+            ORDER BY created_at DESC
+            LIMIT 1
+        """)
+        announcement = cur.fetchone()
+        if announcement:
+            session["announcement_title"] = announcement["title"]
+            session["announcement_message"] = announcement["message"]
+        else:
+            session.pop("announcement_title", None)
+            session.pop("announcement_message", None)
 
         conn.close()
-        flash("Username au password sio sahihi.", "danger")
-        return redirect(url_for("boss_login"))
+
+        # ===============================
+        # 🔹 SUCCESS MESSAGE & REDIRECT
+        # ===============================
+        flash(f"Karibu, {boss['full_name']}!", "success")
+        return redirect(url_for("boss_dashboard"))
 
     return render_template("boss_login.html")
     
@@ -761,75 +939,142 @@ def boss_announcements():
     conn.close()
 
     return render_template("boss_announcements.html", announcements=announcements)
+    
+    
+    
+# ==============================
+# Route ya kulipa subscription ya boss
+# ==============================
+@app.route("/receive_subscription_payment/<boss_id>")
+def receive_subscription_payment(boss_id):
+    # Hapa unaweza call API ya malipo (PayPal, Paystack, etc)
+    return render_template("receive_subscription_payment.html", boss_id=boss_id)
+    
+    
 
 @app.route("/boss/set_new_pin", methods=["GET", "POST"])
 def boss_set_new_pin():
+    # 🔐 Hakikisha boss ameingia kwenye session, vinginevyo rudisha kwenye login
     if "boss_id" not in session:
         flash("Login kwanza.", "danger")
         return redirect(url_for("boss_login"))
 
     boss_id = session["boss_id"]
 
+    # 📝 Angalia kama form imesubmit POST method
     if request.method == "POST":
         new_pin = request.form.get("new_pin")
         confirm_pin = request.form.get("confirm_pin")
 
+        # ⚠️ Kagua kama zote PIN zimejazwa
         if not new_pin or not confirm_pin:
             flash("Tafadhali jaza PIN zote mbili.", "warning")
+        # ⚠️ Kagua kama PIN mpya na uthibitisho wa PIN vinafanana
         elif new_pin != confirm_pin:
             flash("PIN mpya na uthibitisho havilingani.", "warning")
         else:
+            # 🔒 Hash PIN mpya kwa usalama kabla ya kuweka database
             hashed = generate_password_hash(new_pin)
+
+            # 🔌 Fungua connection ya database
             conn = get_db_connection()
             cur = conn.cursor()
-            cur.execute("UPDATE boss SET password=?, status='ACTIVE' WHERE boss_id=?", (hashed, boss_id))
+
+            # 💾 Update password na status ya boss kuwa ACTIVE
+            cur.execute(
+                "UPDATE boss SET password=?, status='ACTIVE' WHERE boss_id=?", 
+                (hashed, boss_id)
+            )
             conn.commit()
             conn.close()
 
+            # ✅ Onyesha message ya mafanikio na rudisha login
             flash("PIN mpya imewekwa kwa mafanikio. Unaweza ku-login sasa.", "success")
             return redirect(url_for("boss_login"))
 
+    # 📄 Rudisha template ya ku-set PIN kama bado form haijasubmit
     return render_template("boss_set_new_pin.html")
 
 
+
+from flask import render_template, session, redirect, url_for, flash
+import sqlite3
+
 @app.route("/boss_dashboard")
 def boss_dashboard():
+    import sqlite3
+    from datetime import datetime, date
+
+    # 🔐 Hakikisha boss ame-login
     if "boss_id" not in session:
         flash("Tafadhali ingia kwanza", "danger")
         return redirect(url_for("boss_login"))
 
     boss_id = session["boss_id"]
 
-    # ✅ ONE-TIME WELCOME MESSAGE
+    # 🔌 Fungua connection ya database
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+
+    # 📌 Pata taarifa za boss
+    boss = conn.execute("SELECT * FROM boss WHERE boss_id=?", (boss_id,)).fetchone()
+    if not boss:
+        conn.close()
+        flash("Boss haipo kwenye systemu!", "danger")
+        return redirect(url_for("boss_login"))
+
+    # 🔴 Kagua trial na subscription
+    today = date.today()
+    trial_end_date = boss['trial_end_date']
+    subscription_end_date = boss['subscription_end_date']
+
+    def parse_date(dt_str):
+        """Parse date/time string ya database safely"""
+        if not dt_str:
+            return None
+        try:
+            # Jaribu timestamp kamili
+            return datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S").date()
+        except ValueError:
+            # Jaribu tarehe tu
+            return datetime.strptime(dt_str, "%Y-%m-%d").date()
+
+    trial_end = parse_date(trial_end_date)
+    subscription_end = parse_date(subscription_end_date)
+
+    # 🔹 BOSS bado kwenye trial
+    on_trial = trial_end and trial_end >= today
+
+    # 🔹 Subscription expired?
+    subscription_expired = not on_trial and (not subscription_end or subscription_end < today)
+
+    if subscription_expired:
+        flash("Muda wako wa kutumia mfumo umeisha. Tafadhali lipa ili kuendelea.", "danger")
+        conn.close()
+        return redirect(url_for("subscription_payment", boss_id=boss_id))
+
+    # ✅ One-time welcome message
     show_welcome = False
     if session.get('just_signed_up'):
         show_welcome = True
         session.pop('just_signed_up', None)
 
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-
-    # -------------------------------
-    # Pata info ya boss
-    # -------------------------------
-    boss = conn.execute("SELECT * FROM boss WHERE boss_id=?", (boss_id,)).fetchone()
-
-    # -------------------------------
-    # Pata customers na meters
-    # -------------------------------
+    # 📌 Pata customers wote wa boss
     customers_raw = conn.execute("""
-        SELECT * FROM customers WHERE boss_id=? ORDER BY full_name
+        SELECT * FROM customers 
+        WHERE boss_id=? 
+        ORDER BY full_name
     """, (boss_id,)).fetchall()
 
+    # 📌 Pata meters zote za customers
     meters_raw = conn.execute("""
-        SELECT * FROM meters WHERE customer_id IN (
+        SELECT * FROM meters 
+        WHERE customer_id IN (
             SELECT customer_id FROM customers WHERE boss_id=?
         )
     """, (boss_id,)).fetchall()
 
-    # -------------------------------
-    # Pata unpaid bills
-    # -------------------------------
+    # 📌 Pata bili ambazo hazijalipwa
     unpaid_bills = conn.execute("""
         SELECT b.*, c.full_name AS customer_name, m.meter_number
         FROM bills b
@@ -839,7 +1084,7 @@ def boss_dashboard():
         ORDER BY b.billing_month DESC
     """, (boss_id,)).fetchall()
 
-    # Jumla ya unpaid bills
+    # 💰 Hesabu jumla ya deni
     total_unpaid_amount = conn.execute("""
         SELECT SUM(b.amount) as total
         FROM bills b
@@ -847,7 +1092,7 @@ def boss_dashboard():
         WHERE b.status='UNPAID' AND c.boss_id=?
     """, (boss_id,)).fetchone()['total'] or 0
 
-    # Jumla ya malipo yote
+    # 💵 Hesabu jumla ya malipo yote
     total_payments = conn.execute("""
         SELECT SUM(p.amount_paid) as total
         FROM payments p
@@ -855,9 +1100,7 @@ def boss_dashboard():
         WHERE c.boss_id=?
     """, (boss_id,)).fetchone()['total'] or 0
 
-    # -------------------------------
-    # Kuangalia meters ambazo zilirukwa kusomwa miezi ya nyuma
-    # -------------------------------
+    # 📌 Angalia meters ambazo hazijasomwa mwezi huu
     skipped_meters = conn.execute("""
         SELECT COUNT(DISTINCT m.meter_id) as total
         FROM meters m
@@ -872,9 +1115,7 @@ def boss_dashboard():
         )
     """, (boss_id,)).fetchone()["total"] or 0
 
-    # -------------------------------
-    # Tengeneza meters map
-    # -------------------------------
+    # 📌 Tengeneza map ya meters kwa customer
     meters_map = {}
     for m in meters_raw:
         meters_map.setdefault(m['customer_id'], []).append({
@@ -882,23 +1123,23 @@ def boss_dashboard():
             'status': m['status']
         })
 
+    # 📌 Unganisha customers na meters zao + status halisi
     customers = []
     for c in customers_raw:
         c_dict = dict(c)
         c_dict['meters'] = meters_map.get(c['customer_id'], [])
+        c_dict['customer_status'] = c['status']
         customers.append(c_dict)
 
-    # Hesabu meters active/inactive
+    # 📊 Hesabu meters active/inactive
     active_meters = sum(
-        1 for mlist in meters_map.values() for m in mlist if m['status']=='ACTIVE'
+        1 for mlist in meters_map.values() for m in mlist if m['status'] == 'ACTIVE'
     )
     inactive_meters = sum(
-        1 for mlist in meters_map.values() for m in mlist if m['status']=='INACTIVE'
+        1 for mlist in meters_map.values() for m in mlist if m['status'] != 'ACTIVE'
     )
 
-    # -------------------------------
-    # Recent Activity Logs (5 za mwisho)
-    # -------------------------------
+    # 📌 Recent activity logs (limit 5)
     recent_logs = conn.execute("""
         SELECT * FROM activity_logs
         WHERE boss_id=?
@@ -906,9 +1147,7 @@ def boss_dashboard():
         LIMIT 5
     """, (boss_id,)).fetchall()
 
-    # -------------------------------
-    # 🔥 Pata Matangazo Mapya (BOSS MPYA HATAONA ZAIDI ZA ZAMANI)
-    # -------------------------------
+    # 📌 Tangazo jipya (one-time)
     announcements = conn.execute("""
         SELECT a.id, a.title, a.message, a.created_at,
                COALESCE(ar.is_read, 0) as is_read
@@ -920,27 +1159,21 @@ def boss_dashboard():
         ORDER BY a.created_at DESC
     """, (boss_id,)).fetchall()
 
-    # -------------------------------
-    # 🔥 ONE-TIME ANNOUNCEMENT LOGIC
-    # -------------------------------
     show_announcement = None
     for ann in announcements:
         if ann['is_read'] == 0 or ann['is_read'] is None:
             show_announcement = ann
-
-            # mark as read permanently (si session tu)
             conn.execute("""
                 INSERT OR REPLACE INTO announcement_reads (boss_id, announcement_id, is_read)
                 VALUES (?, ?, 1)
             """, (boss_id, ann['id']))
             conn.commit()
-            break  # onyesha tangazo moja tu
+            break
 
+    # 🔒 Funga connection
     conn.close()
 
-    # -------------------------------
-    # Render dashboard template
-    # -------------------------------
+    # 🎨 Rudisha data kwenye template
     return render_template(
         "boss_dashboard.html",
         boss=boss,
@@ -982,39 +1215,83 @@ def boss_activity_logs():
     return render_template("boss_activity_logs.html", logs=logs)
     
     
+
 @app.route("/boss/activity_logs/filter", methods=["GET", "POST"])
 def boss_activity_logs_filter():
+
+    # 🔐 Hakikisha boss ame-login kabla ya kuendelea
     if "boss_id" not in session:
         flash("Tafadhali ingia kwanza", "danger")
         return redirect(url_for("boss_login"))
 
+    # 📌 Chukua boss_id kutoka session
     boss_id = session["boss_id"]
+
+    # 🔌 Fungua connection ya database
     conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn.row_factory = sqlite3.Row  # Inaruhusu kutumia column kwa jina (dict-like)
     cursor = conn.cursor()
 
+    # 📦 Variable ya kuhifadhi logs zitakazopatikana
     logs = []
 
+    # -------------------------------
+    # 📥 Ikiwa form ime-submit (POST request)
+    # -------------------------------
     if request.method == "POST":
-        month = request.form.get("month")  # format: MM
-        year = request.form.get("year")    # format: YYYY
 
+        # 📅 Pokea mwezi na mwaka kutoka form
+        # month → format: "03"
+        # year  → format: "2026"
+        month = request.form.get("month")
+        year = request.form.get("year")
+
+        # ✅ Hakikisha zote zimejazwa
         if month and year:
-            # ✅ Filter logs kwa boss pekee
+
+            # 🔍 Filter activity logs kwa:
+            # - boss husika tu
+            # - mwaka uliyochaguliwa
+            # - mwezi uliyochaguliwa
             logs = cursor.execute("""
                 SELECT * FROM activity_logs
-                WHERE boss_id=? AND strftime('%Y', time)=? AND strftime('%m', time)=?
+                WHERE boss_id = ?
+                AND strftime('%Y', time) = ?
+                AND strftime('%m', time) = ?
                 ORDER BY time DESC
-            """, (boss_id, year, month.zfill(2))).fetchall()
+            """, (
+                boss_id,
+                year,
+                month.zfill(2)  # Hakikisha mwezi una format ya 2 digits (mf. "03")
+            )).fetchall()
+
         else:
+            # ⚠️ Kama user hajachagua month au year
             flash("Chagua mwezi na mwaka sahihi", "danger")
 
+    # 🔒 Funga connection ya database
     conn.close()
-    return render_template("boss_activity_logs_filter.html", logs=logs)
+
+    # -------------------------------
+    # 🎨 Rudisha template pamoja na data ya logs
+    # -------------------------------
+    return render_template(
+        "boss_activity_logs.html",
+        logs=logs
+    )
+
+
 @app.route("/boss/logout")
 def boss_logout():
+
+    # 🔐 Ondoa boss_id kwenye session (kumtoa user kwenye mfumo)
+    # Hii inamaanisha boss hatakuwa tena logged in
     session.pop("boss_id", None)
+
+    # 📢 Toa ujumbe wa mafanikio baada ya logout
     flash("Umetoka kwenye dashboard ya boss", "success")
+
+    # 🔁 Mpeleke user kwenye ukurasa wa login
     return redirect(url_for("boss_login"))
 
 
@@ -1177,28 +1454,59 @@ def edit_customer(customer_id):
     return render_template("edit_customer.html", customer=customer, meter=meter)
 
 
+
+
+
 @app.route("/boss/deactivate_customer/<customer_id>")
 def deactivate_customer(customer_id):
+
+    # 🔐 Hakikisha boss ame-login kabla ya kufanya action yoyote
     if "boss_id" not in session:
         flash("Tafadhali ingia kwanza", "danger")
         return redirect(url_for("boss_login"))
+
+    # 🔌 Fungua connection ya database
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("SELECT * FROM customers WHERE customer_id=?", (customer_id,))
+
+    # 🔍 Hakikisha mteja anayehitajika yupo kwenye database
+    cur.execute(
+        "SELECT * FROM customers WHERE customer_id=?", 
+        (customer_id,)
+    )
     customer = cur.fetchone()
+
+    # ❌ Kama mteja hayupo → rudisha error
     if not customer:
-        flash("Mteja haipo", "danger")
+        flash("Mteja hayupo", "danger")
         conn.close()
         return redirect(url_for("boss_dashboard"))
+
     try:
-        cur.execute("UPDATE customers SET status='INACTIVE' WHERE customer_id=?", (customer_id,))
+        # 🔒 Badilisha status ya mteja kuwa INACTIVE (kumfungia huduma)
+        cur.execute(
+            "UPDATE customers SET status='INACTIVE' WHERE customer_id=?", 
+            (customer_id,)
+        )
+
+        # 💾 Hifadhi mabadiliko kwenye database
         conn.commit()
+
+        # ✅ Ujumbe wa mafanikio
         flash(f"Mteja {customer['full_name']} amefungwa!", "success")
+
     except sqlite3.Error as e:
+        # ⚠️ Kama kuna kosa la database
         flash(f"Kosa la database: {e}", "danger")
+
     finally:
+        # 🔒 Hakikisha connection inafungwa kila wakati
         conn.close()
+
+    # 🔁 Rudisha boss kwenye dashboard
     return redirect(url_for("boss_dashboard"))
+
+
 
 @app.route("/boss/delete_customer/<customer_id>", methods=["GET", "POST"])
 def delete_customer(customer_id):
@@ -1258,7 +1566,6 @@ def delete_customer(customer_id):
         return redirect(url_for("boss_dashboard"))
     
 # ================= READ METER =====================
-
 @app.route("/read_meter", methods=["GET", "POST"])
 def read_meter():
 
@@ -1312,7 +1619,7 @@ def read_meter():
 
         # 🔹 Angalia meter ipo
         cur.execute("""
-            SELECT m.meter_id, m.customer_id, m.status AS meter_status, c.full_name
+            SELECT m.meter_id, m.customer_id, m.status AS meter_status, c.full_name, c.status AS customer_status
             FROM meters m
             JOIN customers c ON m.customer_id = c.customer_id
             WHERE m.meter_number=? AND c.boss_id=?
@@ -1321,6 +1628,12 @@ def read_meter():
         meter = cur.fetchone()
         if not meter:
             flash("Meter hii haipo au sio ya wateja wako", "danger")
+            conn.close()
+            return render_template("read_meter.html", bill=None)
+
+        # 🔹 Kagua customer status kwanza
+        if meter["customer_status"] != "ACTIVE":
+            flash(f"⚠️ Hauwezi kusoma meter ya mteja {meter['full_name']} kwa sababu status yake ni {meter['customer_status']}.", "warning")
             conn.close()
             return render_template("read_meter.html", bill=None)
 
@@ -1393,7 +1706,7 @@ def read_meter():
         amount = units_used * price_per_unit
         bill_id = "BILL-" + str(uuid.uuid4())[:8]
 
-        # 🔹 Insert bill mpya bila read_by na reader_role
+        # 🔹 Insert bill mpya
         cur.execute("""
             INSERT INTO bills
             (bill_id, customer_id, meter_id,
@@ -1426,7 +1739,6 @@ def read_meter():
         flash(f"✅ Bill imejengwa kwa {meter_number} ({meter['full_name']})", "success")
 
     return render_template("read_meter.html", bill=bill)
-
 
 @app.route("/boss/meters")
 def boss_meters():
@@ -1507,43 +1819,88 @@ def boss_add_meter(customer_id):
     
 @app.route("/boss/tariff", methods=["GET", "POST"])
 def boss_tariff():
+
+    # 🔐 AUTHENTICATION CHECK
+    # Hakikisha boss ame-login kabla ya ku-access route hii
     if "boss_id" not in session:
         flash("Tafadhali ingia kwanza", "danger")
         return redirect(url_for("boss_login"))
 
+    # 📌 Chukua boss_id kutoka session (hutumika kwenye queries zote)
     boss_id = session["boss_id"]
+
+    # 🔌 Fungua database connection
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # POST: Hapa boss anaweka au update tariff
+    # ============================================================
+    # 📥 POST REQUEST → CREATE / UPDATE TARIFF
+    # ============================================================
     if request.method == "POST":
+
+        # 📊 Pokea thamani ya price_per_unit kutoka form
         price_per_unit = request.form.get("price_per_unit")
+
+        # ⚠️ Validation: Hakikisha value ipo
         if not price_per_unit:
             flash("Tafadhali weka price per unit", "danger")
             return redirect(url_for("boss_tariff"))
+
         try:
+            # 🔢 Convert input kuwa float (inahakikisha ni namba sahihi)
             price_per_unit = float(price_per_unit)
+
+            # 🆔 Generate unique tariff_id
             tariff_id = "TARIFF-" + uuid.uuid4().hex[:8]
+
+            # 🕒 Weka timestamp ya creation
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            # 💾 Hifadhi tariff mpya kwenye database
             cur.execute("""
                 INSERT INTO tariffs (tariff_id, boss_id, price_per_unit, created_at)
                 VALUES (?, ?, ?, ?)
             """, (tariff_id, boss_id, price_per_unit, now))
+
+            # ✅ Commit mabadiliko
             conn.commit()
+
+            # 📢 Feedback ya mafanikio
             flash(f"Tariff imeundwa: {price_per_unit} Tsh/unit", "success")
+
         except ValueError:
+            # ❌ Error: input sio namba sahihi
             flash("Price per unit lazima iwe namba sahihi", "danger")
+
         except sqlite3.Error as e:
+            # ❌ Error ya database
             flash(f"Kosa la database: {e}", "danger")
+
+        # 🔁 Redirect ili kuzuia form resubmission (PRG pattern)
         return redirect(url_for("boss_tariff"))
 
-    # GET: Onyesha latest tariff ya boss
+    # ============================================================
+    # 📤 GET REQUEST → FETCH LATEST TARIFF
+    # ============================================================
+
+    # 🔍 Chukua tariff ya mwisho (latest) ya boss
     cur.execute("""
-        SELECT * FROM tariffs WHERE boss_id=? ORDER BY created_at DESC LIMIT 1
+        SELECT * FROM tariffs 
+        WHERE boss_id=? 
+        ORDER BY created_at DESC 
+        LIMIT 1
     """, (boss_id,))
+
     tariff = cur.fetchone()
+
+    # 🔒 Funga database connection
     conn.close()
-    return render_template("boss_tariff.html", tariff=tariff)
+
+    # 🎨 Render template pamoja na data ya tariff
+    return render_template(
+        "boss_tariff.html",
+        tariff=tariff
+    )
     
     
 # ================= UNREAD METERS =====================
@@ -1693,118 +2050,209 @@ def unpaid_bills():
     # ======== Return template ========
     return render_template("unpaid_bills.html", unpaid_bills=bills, user_role=user_role)
                                
+
+
 @app.route("/boss/customers")
 def boss_view_customers():
+
+    # 🔐 AUTHENTICATION CHECK
+    # Hakikisha boss ame-login kabla ya ku-access route hii
     if "boss_id" not in session:
         flash("Tafadhali ingia kwanza", "danger")
         return redirect(url_for("boss_login"))
 
+    # 📌 Chukua boss_id kutoka session (hutumika kufilter data zake tu)
     boss_id = session["boss_id"]
-    conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
 
-    # Chukua customers na meters zao zote (row moja kwa customer)
+    # 🔌 Fungua database connection
+    conn = get_db_connection()
+    conn.row_factory = sqlite3.Row  # Inaruhusu kutumia columns kama dict (mf. row['full_name'])
+
+    # ============================================================
+    # 📊 FETCH CUSTOMERS + METERS (AGGREGATED VIEW)
+    # ============================================================
+    # Lengo:
+    # - Kupata kila customer wa boss
+    # - Kuunganisha meters zote za customer mmoja kuwa row moja
+    # - Kutumia GROUP_CONCAT ili ku-display meters nyingi kwenye column moja
     customers = conn.execute("""
-        SELECT c.customer_id, c.full_name AS customer_name,
-               c.phone, c.area, c.house_number,
-               c.status AS customer_status,
-               GROUP_CONCAT(m.meter_number) AS meters,
-               GROUP_CONCAT(m.status) AS meter_statuses
+        SELECT 
+            c.customer_id, 
+            c.full_name AS customer_name,
+            c.phone, 
+            c.area, 
+            c.house_number,
+            c.status AS customer_status,
+
+            -- 🔢 Unganisha meter numbers zote za customer mmoja (comma separated)
+            GROUP_CONCAT(m.meter_number) AS meters,
+
+            -- 📡 Unganisha status za meters (ACTIVE/INACTIVE n.k.)
+            GROUP_CONCAT(m.status) AS meter_statuses
+
         FROM customers c
-        LEFT JOIN meters m ON c.customer_id = m.customer_id
+
+        -- 🔗 Left join ili hata customer asiye na meter aonekane
+        LEFT JOIN meters m 
+            ON c.customer_id = m.customer_id
+
+        -- 🔒 Hakikisha tunaonyesha customers wa boss husika tu
         WHERE c.boss_id = ?
+
+        -- 📌 Group kwa customer ili kupata row moja kwa kila customer
         GROUP BY c.customer_id
+
+        -- 🔤 Panga kwa jina (A-Z)
         ORDER BY c.full_name
     """, (boss_id,)).fetchall()
 
+    # 🔒 Funga database connection
     conn.close()
-    return render_template("boss_customers.html", customers=customers)
-    
+
+    # 🎨 Render template pamoja na data ya customers
+    return render_template(
+        "boss_customers.html",
+        customers=customers
+    )
+
+
     
 @app.route("/boss/toggle_meter/<meter_number>")
 def toggle_meter(meter_number):
-    # Hakikisha boss amelogin
+    
+    # 🔐 AUTHENTICATION CHECK
+    # Hakikisha boss ame-login kabla ya kufanya action yoyote
     if "boss_id" not in session:
         flash("Tafadhali ingia kwanza", "danger")
         return redirect(url_for("boss_login"))
 
+    # 📌 Chukua boss_id kutoka session (ili ku-verify ownership)
     boss_id = session["boss_id"]
+
+    # 🔌 Fungua database connection
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Hakikisha meter ipo na ni ya mteja wa boss huyu
+    # ============================================================
+    # 🔍 VERIFY METER BELONGS TO BOSS
+    # ============================================================
+    # Lengo:
+    # 1️⃣ Hakikisha meter ipo kwenye database
+    # 2️⃣ Hakikisha meter inahusiana na mteja wa boss huyu
     cur.execute("""
-        SELECT m.status FROM meters m
+        SELECT m.status 
+        FROM meters m
         JOIN customers c ON m.customer_id = c.customer_id
         WHERE m.meter_number = ? AND c.boss_id = ?
     """, (meter_number, boss_id))
 
     meter = cur.fetchone()
+
+    # ❌ Kama meter haipo au sio ya account ya boss huyu → rudisha error
     if not meter:
-        flash("Meter haipatikani au sio ya account yako", "danger")
+        flash("Meter haipatikani au sio ya mteja wako", "danger")
         conn.close()
         return redirect(url_for("boss_view_customers"))
 
-    # Toggle status
+    # ============================================================
+    # 🔄 TOGGLE METER STATUS
+    # ============================================================
+    # Logic:
+    # - Kama status ni ACTIVE → set kuwa INACTIVE
+    # - Kama status ni INACTIVE → set kuwa ACTIVE
     new_status = "INACTIVE" if meter["status"] == "ACTIVE" else "ACTIVE"
+
+    # 💾 Update database
     cur.execute("""
         UPDATE meters
         SET status = ?
         WHERE meter_number = ?
     """, (new_status, meter_number))
 
+    # ✅ Commit mabadiliko
     conn.commit()
+
+    # 🔒 Funga connection ya database
     conn.close()
+
+    # 📢 Feedback message kwa boss
     flash(f"Meter {meter_number} imebadilishwa kuwa {new_status}", "success")
+
+    # 🔁 Rudisha boss kwenye customers view
     return redirect(url_for("boss_view_customers"))
+
+
+
     
 @app.route("/boss/toggle_customer/<customer_id>")
 def toggle_customer(customer_id):
 
-    # 1️⃣ Hakikisha boss amelogin
+    # ============================================================
+    # 1️⃣ AUTHENTICATION CHECK
+    # ============================================================
+    # Hakikisha boss ame-login kabla ya kufanya action yoyote
     if "boss_id" not in session:
         flash("Tafadhali ingia kwanza", "danger")
         return redirect(url_for("boss_login"))
 
+    # 📌 Chukua boss_id kutoka session (hutumika kufilter customer)
     boss_id = session["boss_id"]
 
+    # 🔌 Fungua connection ya database
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # 2️⃣ Hakikisha customer ni wa boss huyu
+    # ============================================================
+    # 2️⃣ VERIFY CUSTOMER BELONGS TO THIS BOSS
+    # ============================================================
+    # Lengo:
+    # - Hakikisha customer ipo kwenye database
+    # - Hakikisha customer anahusiana na boss huyu
     cur.execute("""
-        SELECT status FROM customers
+        SELECT status 
+        FROM customers
         WHERE customer_id = ? AND boss_id = ?
     """, (customer_id, boss_id))
 
     customer = cur.fetchone()
 
+    # ❌ Kama customer haipo au sio wa boss huyu → rudisha error
     if not customer:
         flash("Mteja hapatikani au sio wa account yako", "danger")
         conn.close()
         return redirect(url_for("boss_view_customers"))
 
-    # 3️⃣ Badilisha status
+    # ============================================================
+    # 3️⃣ TOGGLE CUSTOMER STATUS
+    # ============================================================
+    # Logic:
+    # - Kama status ni ACTIVE → set kuwa INACTIVE
+    # - Kama status ni INACTIVE → set kuwa ACTIVE
     if customer["status"] == "ACTIVE":
         new_status = "INACTIVE"
     else:
         new_status = "ACTIVE"
 
+    # 💾 Update database
     cur.execute("""
         UPDATE customers
         SET status = ?
         WHERE customer_id = ?
     """, (new_status, customer_id))
 
+    # ✅ Commit changes
     conn.commit()
+
+    # 🔒 Funga connection ya database
     conn.close()
 
+    # 📢 Feedback kwa boss
     flash("Status ya mteja imebadilishwa kikamilifu", "success")
+
+    # 🔁 Rudisha boss kwenye view ya customers
     return redirect(url_for("boss_view_customers"))
     
     
-
-# ================= RECEIVE PAYMENT =====================
 # ================= RECEIVE PAYMENT =====================
 @app.route("/receive_payment/<bill_id>", methods=["GET", "POST"])
 def receive_payment(bill_id):
@@ -1980,68 +2428,134 @@ def view_receipt(receipt_id):
     # Onyesha template ya risiti, tuma role
     return render_template("receipt.html", receipt=receipt, user_role=user_role)
 
-    return render_template("receipt.html", receipt=receipt)    
+    return render_template("receipt.html", receipt=receipt) 
+    
+       
+
 @app.route("/boss/add_staff", methods=["GET", "POST"])
 def add_staff():
+
+    # ============================================================
+    # 1️⃣ AUTHENTICATION CHECK
+    # ============================================================
+    # Hakikisha boss ame-login kabla ya ku-access route hii
     if "boss_id" not in session:
         flash("Tafadhali ingia kwanza", "danger")
         return redirect(url_for("boss_login"))
 
+    # 📌 Chukua boss_id kutoka session (inatumika kufilter data za staff)
     boss_id = session["boss_id"]
 
+    # ============================================================
+    # 2️⃣ HANDLE POST REQUEST → CREATE NEW STAFF
+    # ============================================================
     if request.method == "POST":
+
+        # 📝 Pokea input kutoka form
         full_name = request.form.get("full_name")
         username = request.form.get("username")
         password = request.form.get("password")
-        role = request.form.get("role")  # backend-friendly value
+        role = request.form.get("role")  # backend-friendly value (mf. admin, cashier)
 
+        # ⚠️ Validation: Hakikisha zote zimejazwa
         if not full_name or not username or not password or not role:
             flash("Tafadhali jaza majina yote, username, password na jukumu", "danger")
             return redirect(url_for("add_staff"))
 
+        # 🔒 Hash password kabla ya ku-store (security best practice)
         hashed_pw = generate_password_hash(password)
+
+        # 🆔 Generate unique staff_id
         staff_id = generate_staff_id()
+
+        # 🕒 Weka timestamp ya creation
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # 🔧 Set initial status
         status = "ACTIVE"
 
+        # 🔌 Fungua database connection
         conn = get_db_connection()
         cur = conn.cursor()
 
         try:
+            # 💾 Insert staff mpya kwenye database
             cur.execute("""
-                INSERT INTO staff (staff_id, boss_id, full_name, username, password, role, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO staff (
+                    staff_id, boss_id, full_name, username, password, role, status, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (staff_id, boss_id, full_name, username, hashed_pw, role, status, now))
+
+            # ✅ Commit changes
             conn.commit()
+
+            # 📢 Feedback ya mafanikio kwa boss
             flash(f"Staff {full_name} ameundwa kikamilifu na role '{role}'", "success")
+
         except sqlite3.IntegrityError:
+            # ❌ Error: username tayari ipo kwenye system
             flash("Username tayari ipo kwenye mfumo.", "danger")
+
         finally:
+            # 🔒 Funga connection kila hali
             conn.close()
 
+        # 🔁 Redirect → Rudisha boss kwenye staff view page
         return redirect(url_for("view_staff"))
 
-    return render_template("add_staff.html")
+    # ============================================================
+    # 3️⃣ HANDLE GET REQUEST → DISPLAY FORM
+    # ============================================================
+    return render_template("add_staff.html")              
+                      
+
                           
-# ==========================
-# Route: Orodhesha staff wa boss
-# ==========================
+# ============================================================
+# Route: View Staff
+# ============================================================
+# 🔹 Lengo: Orodhesha staff wote waliopo chini ya boss aliyelogin
+# 🔹 Method: GET (ina-display data tu)
+# 🔹 Template: view_staff.html
+# ============================================================
+
 @app.route("/boss/view_staff")
 def view_staff():
+
+    # ============================================================
+    # 1️⃣ AUTHENTICATION CHECK
+    # ============================================================
+    # Hakikisha boss ame-login kabla ya ku-access route hii
     if "boss_id" not in session:
         flash("Tafadhali ingia kwanza", "danger")
         return redirect(url_for("boss_login"))
 
+    # 📌 Chukua boss_id kutoka session (ina filter staff wa boss huyu tu)
     boss_id = session["boss_id"]
+
+    # ============================================================
+    # 2️⃣ DATABASE QUERY → Pata list ya staff
+    # ============================================================
     conn = get_db_connection()
     cur = conn.cursor()
+
+    # 🔍 Chukua staff wote waliopo kwa boss huyu
     cur.execute("SELECT * FROM staff WHERE boss_id=?", (boss_id,))
     staff_list = cur.fetchall()
+
+    # 🔒 Funga connection ya database
     conn.close()
 
-    # Hapa tuna send variable jina sawa na template
-    return render_template("view_staff.html", staff_members=staff_list)
-    
+    # ============================================================
+    # 3️⃣ RENDER TEMPLATE
+    # ============================================================
+    # Variable `staff_members` inatumika kwenye template
+    # ili ku-display table au list ya staff
+    return render_template(
+        "view_staff.html",
+        staff_members=staff_list
+    )
+
+
     
 @app.route("/boss/toggle_staff/<staff_id>")
 def toggle_staff(staff_id):
@@ -2252,90 +2766,185 @@ def staff_view_customers():
     )
     
 
+
+# ============================================================
+# Route: Boss Monthly Report
+# ============================================================
 @app.route("/boss/monthly_report")
 def boss_monthly_report():
+
+    # ------------------------------------------------
+    # AUTHENTICATION CHECK
+    # ------------------------------------------------
+    # Hakikisha boss amelogin kabla ya kupata report
+    # Hii inalinda data dhidi ya unauthorized access
     if "boss_id" not in session:
         flash("Tafadhali ingia kwanza", "danger")
         return redirect(url_for("boss_login"))
 
+    # Chukua boss_id kutoka kwenye session
     boss_id = session["boss_id"]
+
+    # Chukua mwezi kutoka query parameters (GET request)
+    # Mfano: /boss/monthly_report?month=2026-03
     month = request.args.get("month")
 
+    # ------------------------------------------------
+    # INPUT VALIDATION
+    # ------------------------------------------------
+    # Hakikisha mwezi umechaguliwa kabla ya kuendelea
     if not month:
         flash("Chagua mwezi!", "warning")
         return redirect(url_for("boss_dashboard"))
 
+    # ------------------------------------------------
+    # DATABASE CONNECTION
+    # ------------------------------------------------
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Chukua bills zote za mwezi huo
+    # ------------------------------------------------
+    # FETCH: MONTHLY BILLS DATA
+    # ------------------------------------------------
+    # - Inachukua bills zote za mwezi husika
+    # - JOIN na customers ili kupata jina la mteja
+    # - Inachuja kwa boss_id (data isolation 🔒)
+    # - ORDER BY DESC → records mpya juu
     cur.execute("""
-        SELECT b.bill_id,
-               b.customer_id,
-               c.full_name AS customer_name,
-               b.meter_id,
-               b.units_used,
-               b.amount,
-               b.status,
-               b.billing_month,
-               b.payment_method,
-               b.payment_date
+        SELECT 
+            b.bill_id,
+            b.customer_id,
+            c.full_name AS customer_name,
+            b.meter_id,
+            b.units_used,
+            b.amount,
+            b.status,
+            b.billing_month,
+            b.payment_method,
+            b.payment_date
         FROM bills b
         JOIN customers c ON b.customer_id = c.customer_id
-        WHERE c.boss_id = ? AND b.billing_month = ?
+        WHERE c.boss_id = ? 
+          AND b.billing_month = ?
         ORDER BY b.bill_id DESC
     """, (boss_id, month))
 
+    # Pata records zote za bills
     bills = cur.fetchall()
 
-    # Totals
+    # ------------------------------------------------
+    # DATA AGGREGATION (REPORT CALCULATIONS)
+    # ------------------------------------------------
+
+    # Jumla ya units zote (paid + unpaid)
     total_units = sum(b["units_used"] for b in bills)
+
+    # Jumla ya amount yote (mapato yanayotarajiwa)
     total_amount = sum(b["amount"] for b in bills)
 
-    # Count Paid / Unpaid correctly
+    # ----------------------------------------
+    # STATUS-BASED ANALYSIS
+    # ----------------------------------------
+
+    # Idadi ya bills zilizolipwa (PAID)
+    # .upper() → kuhakikisha consistency hata kama DB ina tofauti ya case
     paid_count = sum(1 for b in bills if b["status"].upper() == "PAID")
+
+    # Idadi ya bills ambazo bado hazijalipwa (UNPAID)
     unpaid_count = sum(1 for b in bills if b["status"].upper() == "UNPAID")
 
-    # Optional: totals for paid bills only
-    total_paid_units = sum(b["units_used"] for b in bills if b["status"].upper() == "PAID")
-    total_paid_amount = sum(b["amount"] for b in bills if b["status"].upper() == "PAID")
+    # ----------------------------------------
+    # PAID-ONLY METRICS (REAL REVENUE)
+    # ----------------------------------------
 
+    # Units zilizolipwa pekee (actual consumption paid)
+    total_paid_units = sum(
+        b["units_used"] for b in bills if b["status"].upper() == "PAID"
+    )
+
+    # Amount iliyolipwa pekee (actual revenue)
+    total_paid_amount = sum(
+        b["amount"] for b in bills if b["status"].upper() == "PAID"
+    )
+
+    # ------------------------------------------------
+    # CLEANUP
+    # ------------------------------------------------
+    # Funga DB connection baada ya matumizi
     conn.close()
 
+    # ------------------------------------------------
+    # RENDER TEMPLATE (VIEW LAYER)
+    # ------------------------------------------------
+    # Tuma data zote kwa frontend kwa ajili ya display/reporting
     return render_template(
         "boss_monthly_report.html",
-        bills=bills,
-        month=month,
-        total_units=total_units,
-        total_amount=total_amount,
-        paid_count=paid_count,
-        unpaid_count=unpaid_count,
-        total_paid_units=total_paid_units,
-        total_paid_amount=total_paid_amount
+        bills=bills,                      # Raw data ya bills
+        month=month,                      # Mwezi uliochaguliwa
+        total_units=total_units,          # Total units zote
+        total_amount=total_amount,        # Total expected revenue
+        paid_count=paid_count,            # Idadi ya waliolipa
+        unpaid_count=unpaid_count,        # Idadi ya wasiolipa
+        total_paid_units=total_paid_units,# Units zilizolipwa
+        total_paid_amount=total_paid_amount # Revenue halisi
     )
             
+# ============================================================
+# Route: Search Customer (Boss Only)
+# ============================================================
 @app.route("/search_customer", methods=["GET","POST"])
 def search_customer():
+
+    # ------------------------------------------------
+    # HANDLE POST REQUEST (SEARCH ACTION)
+    # ------------------------------------------------
+    # POST hutokea pale boss anapowasilisha form ya kutafuta mteja
     if request.method == "POST":
+
+        # Chukua jina la mteja kutoka kwenye form
+        # strip() inaondoa nafasi zisizo za lazima (leading/trailing spaces)
         name = request.form.get("customer_name", "").strip()
 
+        # ----------------------------------------
+        # INPUT VALIDATION
+        # ----------------------------------------
+        # Hakikisha field haiko empty kabla ya kuendelea
         if not name:
             flash("Andika jina la mteja kwanza", "warning")
             return redirect(url_for("search_customer"))
 
+        # ----------------------------------------
+        # AUTHENTICATION CHECK
+        # ----------------------------------------
+        # Hakikisha boss yuko logged in
         boss_id = session.get("boss_id")
         if not boss_id:
             flash("Tafadhali ingia kwanza", "danger")
             return redirect(url_for("boss_login"))
 
+        # ----------------------------------------
+        # DATABASE CONNECTION
+        # ----------------------------------------
+        # Fungua connection ya SQLite DB
+        # row_factory huruhusu kutumia column names kama dictionary keys
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
 
-        # 🔹 Pata wateja wote wa boss, join na meters
+        # ----------------------------------------
+        # SEARCH QUERY (CUSTOMERS + METERS)
+        # ----------------------------------------
+        # - Inatafuta wateja kwa jina (partial match kwa kutumia LIKE)
+        # - COLLATE NOCASE → case-insensitive search (A = a)
+        # - Inachuja kwa boss_id ili boss aone wateja wake tu (security)
+        # - LEFT JOIN → inajumuisha hata wateja wasio na meter
+        # - GROUP_CONCAT → inaunganisha meter numbers zote kuwa string moja
         cur.execute("""
-            SELECT c.customer_id, c.full_name, c.phone,
-                   GROUP_CONCAT(m.meter_number, ', ') as meters
+            SELECT 
+                c.customer_id, 
+                c.full_name, 
+                c.phone,
+                GROUP_CONCAT(m.meter_number, ', ') as meters
             FROM customers c
             LEFT JOIN meters m ON m.customer_id = c.customer_id
             WHERE c.full_name LIKE ? COLLATE NOCASE
@@ -2343,82 +2952,187 @@ def search_customer():
             GROUP BY c.customer_id
         """, ('%' + name + '%', boss_id))
 
+        # Chukua matokeo yote ya search
         customers = cur.fetchall()
+
+        # Funga DB connection baada ya matumizi
         conn.close()
 
+        # ----------------------------------------
+        # RESULT HANDLING
+        # ----------------------------------------
+
+        # Case 1: Hakuna mteja aliyepatikana
         if not customers:
             flash("Mteja hajapatikana", "danger")
             return redirect(url_for("search_customer"))
 
+        # Case 2: Mteja mmoja tu → redirect moja kwa moja kwenye details
+        # Hii inaboresha user experience (UX)
         if len(customers) == 1:
-            return redirect(url_for("customer_details", customer_id=customers[0]["customer_id"]))
+            return redirect(
+                url_for(
+                    "customer_details", 
+                    customer_id=customers[0]["customer_id"]
+                )
+            )
 
+        # Case 3: Wateja wengi → onyesha list ya matokeo
         return render_template("search_results.html", customers=customers)
 
+    # ------------------------------------------------
+    # HANDLE GET REQUEST (INITIAL PAGE LOAD)
+    # ------------------------------------------------
+    # Onyesha form ya kutafuta mteja
     return render_template("search_customer.html")
 
 
+# ============================================================
+# Route: Confirm & Delete Customer (Boss Only)
+# ============================================================
 @app.route("/boss/confirm_delete_customer/<customer_id>", methods=["GET", "POST"])
 def confirm_delete_customer(customer_id):
+
+    # ------------------------------------------------
+    # AUTHENTICATION CHECK
+    # ------------------------------------------------
+    # Hakikisha user amelogin kama boss kabla ya kufanya action yoyote
+    # Hii inalinda route dhidi ya unauthorized access
     if "boss_id" not in session:
         flash("Tafadhali ingia kwanza", "danger")
         return redirect(url_for("boss_login"))
 
+    # ------------------------------------------------
+    # FETCH CUSTOMER (PRE-VALIDATION STEP)
+    # ------------------------------------------------
+    # Chukua taarifa za mteja ili:
+    # 1. Kuhakikisha yupo
+    # 2. Kuonyesha jina kwenye confirmation page
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute("SELECT * FROM customers WHERE customer_id=?", (customer_id,))
     customer = cur.fetchone()
     conn.close()
 
+    # ------------------------------------------------
+    # VALIDATION: CUSTOMER EXISTENCE
+    # ------------------------------------------------
+    # Kama mteja hayupo, epuka kuendelea na process
     if not customer:
         flash("Mteja haipo", "danger")
         return redirect(url_for("boss_dashboard"))
 
+    # ------------------------------------------------
+    # HANDLE POST REQUEST (DELETE ACTION)
+    # ------------------------------------------------
+    # POST inamaanisha boss amethibitisha kufuta mteja
     if request.method == "POST":
-        # Ikiwa boss amethibitisha, futa mteja
+
+        # Fungua connection mpya kwa ajili ya delete operation
         conn = get_db_connection()
         cur = conn.cursor()
+
         try:
+            # ----------------------------------------
+            # DELETE RELATED DATA FIRST (DEPENDENCIES)
+            # ----------------------------------------
+            # Futa meters zinazohusiana na mteja huyu
+            # (kuepuka foreign key constraint errors)
             cur.execute("DELETE FROM meters WHERE customer_id=?", (customer_id,))
+
+            # ----------------------------------------
+            # DELETE MAIN CUSTOMER RECORD
+            # ----------------------------------------
             cur.execute("DELETE FROM customers WHERE customer_id=?", (customer_id,))
+
+            # ----------------------------------------
+            # COMMIT TRANSACTION
+            # ----------------------------------------
+            # Hakikisha mabadiliko yana-save kwenye database
             conn.commit()
+
+            # Feedback kwa user baada ya kufuta
             flash(f"Mteja {customer['full_name']} ameondolewa!", "success")
+
         except sqlite3.Error as e:
+            # ----------------------------------------
+            # ERROR HANDLING
+            # ----------------------------------------
+            # Kama kuna kosa la DB, toa taarifa kwa user
             flash(f"Kosa la database: {e}", "danger")
+
         finally:
+            # ----------------------------------------
+            # CLEANUP
+            # ----------------------------------------
+            # Funga connection kila wakati (success au error)
             conn.close()
+
+        # Baada ya delete, rudisha boss kwenye dashboard
         return redirect(url_for("boss_dashboard"))
 
-    # GET: Onyesha page ya uthibitisho
-    return render_template("confirm_delete_customer.html", customer=customer)              
+    # ------------------------------------------------
+    # HANDLE GET REQUEST (CONFIRMATION PAGE)
+    # ------------------------------------------------
+    # Onyesha page ya kuthibitisha kabla ya kufuta
+    # Hii ni muhimu kwa UX na kuzuia accidental deletion
+    return render_template("confirm_delete_customer.html", customer=customer)
+
+
                 
+
+# ============================================
+# Route: View Customer Details (Boss Only)
+# ============================================
 @app.route("/customer_details/<customer_id>")
 def customer_details(customer_id):
 
+    # -------------------------------
+    # AUTHENTICATION CHECK
+    # -------------------------------
+    # Hakikisha user amelogin kama boss
+    # Kama hajalogin, mzuie na mrudishe login page
     if "boss_id" not in session:
         flash("Tafadhali ingia kwanza", "danger")
         return redirect(url_for("boss_login"))
 
+    # -------------------------------
+    # DATABASE CONNECTION SETUP
+    # -------------------------------
+    # Fungua connection ya SQLite DB
+    # row_factory = sqlite3.Row inaruhusu kupata data kama dictionary (key-based access)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 
-    # pata taarifa za mteja
+    # -------------------------------
+    # FETCH: CUSTOMER BASIC INFO
+    # -------------------------------
+    # Chukua taarifa zote za mteja kulingana na customer_id
+    # Parameterized query inalinda dhidi ya SQL Injection
     cur.execute("""
         SELECT * FROM customers
         WHERE customer_id = ?
     """, (customer_id,))
-    customer = cur.fetchone()
+    customer = cur.fetchone()  # record moja ya mteja
 
-    # pata meters za mteja
+    # -------------------------------
+    # FETCH: CUSTOMER METERS
+    # -------------------------------
+    # Chukua mita zote zinazohusiana na mteja huyu
     cur.execute("""
         SELECT meter_id, meter_number, status
         FROM meters
         WHERE customer_id = ?
     """, (customer_id,))
-    meters = cur.fetchall()
+    meters = cur.fetchall()  # list ya meters
 
-    # pata bills zisizolipwa tu
+    # -------------------------------
+    # FETCH: UNPAID BILLS ONLY
+    # -------------------------------
+    # Chukua bili ambazo bado hazijalipwa (UNPAID)
+    # JOIN inatumika kupata meter_number kutoka table ya meters
+    # ORDER BY DESC → bili mpya zinaanza juu
     cur.execute("""
         SELECT 
             b.bill_id,
@@ -2432,40 +3146,59 @@ def customer_details(customer_id):
         WHERE b.customer_id = ? AND b.status = 'UNPAID'
         ORDER BY b.billing_month DESC
     """, (customer_id,))
-    bills = cur.fetchall()
+    bills = cur.fetchall()  # list ya bills zisizolipwa
 
+    # -------------------------------
+    # CLOSE DATABASE CONNECTION
+    # -------------------------------
+    # Epuka memory leaks kwa kufunga connection
     conn.close()
 
+    # -------------------------------
+    # RENDER TEMPLATE (VIEW LAYER)
+    # -------------------------------
+    # Tuma data zote kwenye HTML template
+    # - customer → taarifa za mteja
+    # - meters → mita zake
+    # - bills → bili ambazo hajalipa
     return render_template(
         "customer_details.html",
         customer=customer,
         meters=meters,
         bills=bills
     )
+
+
+
     
+# ==========================
+# Route: Home / Entry Point
+# ==========================
 @app.route("/")
 def index():
-    # Rudisha user kwa login page
-    return redirect(url_for("boss_login"))
-    # au kwa superadmin: return redirect(url_for("superadmin_login"))    
-    
-    
-    
-@app.route("/check_bosses")
-def check_bosses():
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM boss ORDER BY full_name")
-    bosses = cur.fetchall()
-    conn.close()
-    output = "<h1>Bosses on Render DB</h1><ul>"
-    for b in bosses:
-        output += f"<li>{b['boss_id']} | {b['full_name']} | {b['username']} | {b['status']} | {b['trial_end_date']}</li>"
-    output += "</ul>"
-    return output    
-    
-    
+    # Chukua role ya user kutoka kwenye session
+    # (inawekwa wakati wa login)
+    role = session.get("role")
 
+    # Kama user ni Super Admin
+    # mpelekwe kwenye dashboard yake maalum
+    if role == "superadmin":
+        return redirect(url_for("superadmin_dashboard"))
+
+    # Kama user ni Boss
+    # mpelekwe kwenye boss dashboard
+    elif role == "boss":
+        return redirect(url_for("boss_dashboard"))
+
+    # Kama user ni Staff
+    # mpelekwe kwenye staff dashboard
+    elif role == "staff":
+        return redirect(url_for("staff_dashboard"))
+
+    # Kama hakuna role (user hajalogin au session ime-expire)
+    # mpeleke kwenye login page kama default
+    return redirect(url_for("boss_login"))
+    
     
 # ================= RUN APP ==================
 # ================= RUN APP ==================

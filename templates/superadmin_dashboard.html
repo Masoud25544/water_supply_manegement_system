@@ -4,82 +4,143 @@
     <meta charset="UTF-8">
     <title>Super Admin Dashboard</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <style>
+        /* Dark mode background & text */
+        body {
+            background-color: #121212;
+            color: #f8f9fa;
+        }
+        h1 {
+            color: #f8f9fa;
+        }
+        .badge {
+            font-size: 0.9rem;
+        }
+        table th, table td {
+            vertical-align: middle !important;
+        }
+        .table-hover tbody tr:hover {
+            background-color: #1e1e1e;
+        }
+        /* Make table dark */
+        .table {
+            color: #f8f9fa;
+            background-color: #1c1c1c;
+        }
+        .table thead {
+            background-color: #212529;
+            color: #f8f9fa;
+        }
+        /* Right aligned button */
+        .right-button {
+            float: right;
+        }
+    </style>
 </head>
 <body>
 <div class="container mt-5">
 
-    <!-- Header (imeboreshwa kidogo tu) -->
+    <!-- Header -->
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h1 class="mb-0">Super Admin Dashboard</h1>
 
         <div>
-            <!-- NEW: Tangazo Button -->
             <a href="{{ url_for('create_announcement') }}" class="btn btn-primary me-2">
                 📢 Tuma Tangazo
             </a>
 
-            <!-- ORIGINAL Logout Button -->
             <a href="{{ url_for('superadmin_logout') }}" class="btn btn-danger">
                 Logout
             </a>
         </div>
     </div>
 
-    <!-- Flash messages (HAIJAGUSWA) -->
+    <!-- Flash messages -->
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         {% for category, message in messages %}
           <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
             {{ message }}
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
           </div>
         {% endfor %}
       {% endif %}
     {% endwith %}
 
-    <!-- Boss Wapya Button (HAIJAGUSWA) -->
+    <!-- Boss Wapya Button (Right Aligned) -->
     <div class="mb-3">
-        <a href="{{ url_for('new_bosses') }}" class="btn btn-dark">
+        <a href="{{ url_for('new_bosses') }}" class="btn btn-dark right-button">
             👤 Boss Wapya
         </a>
     </div>
 
-    <!-- Boss Table (IMEBAKI KAMA ILIVYO) -->
-    <table class="table table-bordered table-striped">
-        <thead class="table-dark">
+    <!-- Boss Table -->
+    <table class="table table-bordered table-striped table-hover shadow-sm">
+        <thead class="table-dark text-center">
             <tr>
                 <th>#</th>
                 <th>Full Name</th>
                 <th>Username</th>
                 <th>Status</th>
                 <th>Trial End Date</th>
+                <th>Siku Zilizotumika</th>
+                <th>Siku Zilizobaki</th>
                 <th>Actions</th>
             </tr>
         </thead>
         <tbody>
             {% if bosses %}
                 {% for boss in bosses %}
-                <tr>
+                <tr class="text-center">
                     <td>{{ loop.index }}</td>
                     <td>{{ boss.full_name }}</td>
                     <td>{{ boss.username }}</td>
+
+                    <!-- ✅ STATUS (IMEBORESHWA TU HAPA) -->
                     <td>
                         {% if boss.status == 'ACTIVE' %}
                             <span class="badge bg-success">ACTIVE</span>
+
+                            {% if boss.is_expired %}
+                                <br>
+                                <small class="text-danger">Trial imeisha</small>
+                            {% endif %}
+
+                        {% elif boss.status == 'RESET_PENDING' %}
+                            <span class="badge bg-warning">RESET_PENDING</span>
+
                         {% else %}
-                            <span class="badge bg-secondary">INACTIVE</span>
+                            <span class="badge bg-secondary">{{ boss.status }}</span>
                         {% endif %}
                     </td>
+
                     <td>{{ boss.trial_end_date }}</td>
+
+                    <td>{{ boss.days_passed if boss.days_passed is defined else '-' }}</td>
+
+                    <td>
+                        {% if boss.days_left is defined %}
+                            {% if boss.days_left > 0 %}
+                                <span class="badge bg-success">{{ boss.days_left }} siku</span>
+                            {% else %}
+                                <span class="badge bg-danger">Imezidi</span>
+                            {% endif %}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+
                     <td>
                         <!-- Toggle Status -->
                         <a href="{{ url_for('toggle_boss', boss_id=boss.boss_id) }}" class="btn btn-sm btn-warning mb-1">
                             {% if boss.status == 'ACTIVE' %}Deactivate{% else %}Activate{% endif %}
                         </a>
 
-                        <!-- Request PIN Reset (POST) -->
+                        <!-- Request PIN Reset -->
                         <form method="POST" action="{{ url_for('superadmin_trigger_boss_reset', boss_id=boss.boss_id) }}" style="display:inline;">
-                            <button type="submit" class="btn btn-sm btn-info mb-1">Request PIN Reset</button>
+                            <button type="submit" class="btn btn-sm btn-info mb-1">
+                                Request PIN Reset
+                            </button>
                         </form>
 
                         <!-- View Customers -->
@@ -91,13 +152,16 @@
                 {% endfor %}
             {% else %}
                 <tr>
-                    <td colspan="6" class="text-center">Hakuna boss wa kuonyesha au login required ⚠️</td>
+                    <td colspan="8" class="text-center text-muted">
+                        Hakuna boss wa kuonyesha au login required ⚠️
+                    </td>
                 </tr>
             {% endif %}
         </tbody>
     </table>
 
 </div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
