@@ -16,9 +16,6 @@ app = Flask(__name__)
 app.secret_key = "supersecretkey"
 DB_PATH = "water_supply.db"
 
-
-
-
 # ================================
 # DATABASE SETUP FUNCTION
 # ================================
@@ -678,7 +675,7 @@ def toggle_boss(boss_id):
         cur.execute("UPDATE boss SET status='INACTIVE', subscription_end_date=NULL WHERE boss_id=?", (boss_id,))
     else:
         # Enable boss and set subscription_end_date
-        subscription_end = now + timedelta(minutes=3)  # testing duration
+        subscription_end = now + timedelta(minutes=15)  # testing duration
         cur.execute("""
             UPDATE boss
             SET status='ACTIVE', subscription_end_date=?
@@ -769,6 +766,7 @@ def boss_login():
     3️⃣ Block account ikiwa imefungwa
     4️⃣ Handle RESET_PENDING temporary passwords
     5️⃣ Initialize session na announcements
+    6️⃣ Provide user-friendly and context-aware messages
     """
     if request.method == "POST":
         username = request.form.get("username")
@@ -786,7 +784,7 @@ def boss_login():
 
         if not boss:
             conn.close()
-            flash("Username au password sio sahihi.", "danger")
+            flash("Username au password sio sahihi. Jaribu tena.", "danger")
             return redirect(url_for("boss_login"))
 
         boss = dict(boss)
@@ -800,11 +798,14 @@ def boss_login():
                 session.clear()
                 session["boss_id"] = boss["boss_id"]
                 conn.close()
-                flash("Tafadhali weka PIN mpya.", "warning")
+                flash(
+                    "Temporary password imethibitishwa. Tafadhali weka PIN mpya ili kuendelea.",
+                    "warning"
+                )
                 return redirect(url_for("boss_set_new_pin"))
             else:
                 conn.close()
-                flash("Temporary password sio sahihi.", "danger")
+                flash("Temporary password sio sahihi. Jaribu tena.", "danger")
                 return redirect(url_for("boss_login"))
 
         # ===============================
@@ -812,20 +813,29 @@ def boss_login():
         # ===============================
         if not check_password_hash(boss["password"], password):
             conn.close()
-            flash("Username au password sio sahihi.", "danger")
+            flash("Username au password sio sahihi. Jaribu tena.", "danger")
             return redirect(url_for("boss_login"))
 
         # ===============================
-        # 🔹 PARSE trial_end_date SAFELY
+        # 🔹 PARSE TRIAL & SUBSCRIPTION DATES SAFELY
         # ===============================
         trial_end = boss.get("trial_end_date")
+        sub_end = boss.get("subscription_end_date")
         try:
             if trial_end and isinstance(trial_end, str):
                 trial_end = datetime.strptime(trial_end, "%Y-%m-%d %H:%M:%S")
         except Exception:
             trial_end = None
 
-        # 🔹 AUTO-EXPIRE TRIAL
+        try:
+            if sub_end and isinstance(sub_end, str):
+                sub_end = datetime.strptime(sub_end, "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            sub_end = None
+
+        # ===============================
+        # 🔹 AUTO-EXPIRE TRIAL OR SUBSCRIPTION
+        # ===============================
         if boss["status"] == "TRIAL" and trial_end and now > trial_end:
             cur.execute(
                 "UPDATE boss SET status=? WHERE boss_id=?",
@@ -833,32 +843,36 @@ def boss_login():
             )
             conn.commit()
             boss["status"] = "INACTIVE"
+            flash(
+                "Umejaribu mfumo wa demo na muda wa jaribio umeisha. Tafadhali tupatie maoni yako au wasiliana na support.",
+                "warning"
+            )
+            conn.close()
+            return redirect(url_for("boss_login"))
 
-        # ===============================
-        # 🔹 PARSE subscription_end_date SAFELY
-        # ===============================
-        sub_end = boss.get("subscription_end_date")
-        try:
-            if sub_end and isinstance(sub_end, str):
-                sub_end = datetime.strptime(sub_end, "%Y-%m-%d %H:%M:%S")
-        except Exception:
-            sub_end = None
-
-        # 🔹 AUTO-EXPIRE CHECK (subscription only)
-        if sub_end and now > sub_end and boss["status"] == "ACTIVE":
+        if boss["status"] == "ACTIVE" and sub_end and now > sub_end:
             cur.execute(
                 "UPDATE boss SET status=? WHERE boss_id=?",
                 ("INACTIVE", boss["boss_id"])
             )
             conn.commit()
             boss["status"] = "INACTIVE"
+            flash(
+                "Subscription yako imeisha. Tafadhali lipa kuendelea ili kuendelea kutumia mfumo.",
+                "warning"
+            )
+            conn.close()
+            return redirect(url_for("boss_login"))
 
         # ===============================
-        # 🔹 BLOCK LOGIN IF INACTIVE
+        # 🔹 BLOCK LOGIN IF MANUALLY INACTIVE
         # ===============================
         if boss["status"] == "INACTIVE":
             conn.close()
-            flash("Account yako imefungwa. Tafadhali lipa kuendelea.", "danger")
+            flash(
+                "Huduma zimesitishwa kwa sasa. Tafadhali wasiliana na support kwa msaada zaidi (ph. 0744906763).",
+                "danger"
+            )
             return redirect(url_for("boss_login"))
 
         # ===============================
@@ -888,12 +902,20 @@ def boss_login():
         conn.close()
 
         # ===============================
-        # 🔹 SUCCESS MESSAGE & REDIRECT
+        # 🔹 SUCCESS MESSAGE BASED ON STATUS
         # ===============================
-        flash(f"Karibu, {boss['full_name']}!", "success")
+        if boss["status"] == "TRIAL":
+            flash(
+                "Karibu ! umeanza kutumia mfumo . mara baada ya kutumia mfumo huu tafadhali tupatie maoni yako ili tuendelee kuboresha huduma zetu  (ph.0744906763).",
+                "info"
+            )
+        elif boss["status"] == "ACTIVE":
+            flash(f"Karibu tena, {boss['full_name']}! Tuna furaha kukuona hapa.", "success")
+
         return redirect(url_for("boss_dashboard"))
 
     return render_template("boss_login.html")
+    
     
     
 @app.route("/boss/announcements")
@@ -1029,14 +1051,12 @@ def boss_dashboard():
     subscription_end_date = boss['subscription_end_date']
 
     def parse_date(dt_str):
-        """Parse date/time string ya database safely"""
+        """Safely parse date/time string ya database"""
         if not dt_str:
             return None
         try:
-            # Jaribu timestamp kamili
             return datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S").date()
         except ValueError:
-            # Jaribu tarehe tu
             return datetime.strptime(dt_str, "%Y-%m-%d").date()
 
     trial_end = parse_date(trial_end_date)
@@ -1045,13 +1065,21 @@ def boss_dashboard():
     # 🔹 BOSS bado kwenye trial
     on_trial = trial_end and trial_end >= today
 
-    # 🔹 Subscription expired?
+    # 🔹 Subscription expired? (kama trial imeisha na subscription haijalipwa)
     subscription_expired = not on_trial and (not subscription_end or subscription_end < today)
 
-    if subscription_expired:
-        flash("Muda wako wa kutumia mfumo umeisha. Tafadhali lipa ili kuendelea.", "danger")
+    # 🔹 Set message kulingana na hali ya boss
+    boss_message = ""
+    if on_trial:
+        boss_message = "Umepata muda wa trial, tafadhali jaribu mfumo na tupe maoni yako."
+    elif subscription_expired:
+        boss_message = "Muda wako wa kutumia mfumo umeisha. Tafadhali lipa ili kuendelea."
+        # Redirect kwa payment page automatically
         conn.close()
+        flash(boss_message, "danger")
         return redirect(url_for("subscription_payment", boss_id=boss_id))
+    else:
+        boss_message = "Subscription yako ni active, unaendelea kutumia huduma."
 
     # ✅ One-time welcome message
     show_welcome = False
@@ -1186,9 +1214,9 @@ def boss_dashboard():
         skipped_meters=skipped_meters,
         recent_logs=recent_logs,
         show_welcome=show_welcome,
-        announcement=show_announcement
+        announcement=show_announcement,
+        boss_message=boss_message  # ✅ Hii ndio message mpya kulingana na trial/subscription
     )
-
 
 
 @app.route("/boss/activity_logs")
@@ -1203,23 +1231,31 @@ def boss_activity_logs():
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
+    # 🔥 Chukua taarifa za boss
+    cursor.execute("SELECT * FROM boss WHERE id = ?", (session["boss_id"],))
+    boss = cursor.fetchone()
+
     # Chukua logs zote
     cursor.execute("""
         SELECT * FROM activity_logs
         ORDER BY time DESC
     """)
-
     logs = cursor.fetchall()
+
     conn.close()
 
-    return render_template("boss_activity_logs.html", logs=logs)
-    
+    # 🔥 Tuma boss + logs
+    return render_template(
+        "boss_activity_logs.html",
+        logs=logs,
+        boss=boss
+    )
     
 
 @app.route("/boss/activity_logs/filter", methods=["GET", "POST"])
 def boss_activity_logs_filter():
 
-    # 🔐 Hakikisha boss ame-login kabla ya kuendelea
+    # 🔐 Hakikisha boss ame-login
     if "boss_id" not in session:
         flash("Tafadhali ingia kwanza", "danger")
         return redirect(url_for("boss_login"))
@@ -1229,7 +1265,7 @@ def boss_activity_logs_filter():
 
     # 🔌 Fungua connection ya database
     conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row  # Inaruhusu kutumia column kwa jina (dict-like)
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
     # 📦 Variable ya kuhifadhi logs zitakazopatikana
@@ -1239,45 +1275,40 @@ def boss_activity_logs_filter():
     # 📥 Ikiwa form ime-submit (POST request)
     # -------------------------------
     if request.method == "POST":
-
         # 📅 Pokea mwezi na mwaka kutoka form
-        # month → format: "03"
-        # year  → format: "2026"
-        month = request.form.get("month")
-        year = request.form.get("year")
+        month = request.form.get("month")  # format: "03"
+        year  = request.form.get("year")   # format: "2026"
 
-        # ✅ Hakikisha zote zimejazwa
         if month and year:
-
-            # 🔍 Filter activity logs kwa:
-            # - boss husika tu
-            # - mwaka uliyochaguliwa
-            # - mwezi uliyochaguliwa
+            # 🔍 Filter activity logs kwa boss, mwaka, mwezi
             logs = cursor.execute("""
                 SELECT * FROM activity_logs
                 WHERE boss_id = ?
-                AND strftime('%Y', time) = ?
-                AND strftime('%m', time) = ?
+                  AND strftime('%Y', time) = ?
+                  AND strftime('%m', time) = ?
                 ORDER BY time DESC
             """, (
                 boss_id,
                 year,
-                month.zfill(2)  # Hakikisha mwezi una format ya 2 digits (mf. "03")
+                month.zfill(2)
             )).fetchall()
-
         else:
-            # ⚠️ Kama user hajachagua month au year
             flash("Chagua mwezi na mwaka sahihi", "danger")
+
+    # 🔥 Chukua taarifa za boss (fix: tumia boss_id, sio id)
+    cursor.execute("SELECT * FROM boss WHERE boss_id = ?", (boss_id,))
+    boss = cursor.fetchone()
 
     # 🔒 Funga connection ya database
     conn.close()
 
     # -------------------------------
-    # 🎨 Rudisha template pamoja na data ya logs
+    # 🎨 Rudisha template pamoja na data ya logs na boss
     # -------------------------------
     return render_template(
         "boss_activity_logs.html",
-        logs=logs
+        logs=logs,
+        boss=boss   # ✅ sasa template itapata boss.full_name
     )
 
 
@@ -2584,6 +2615,10 @@ def toggle_staff(staff_id):
     return redirect(url_for("view_staff")) 
     
 # ================= STAFF LOGIN =====================
+from flask import session, redirect, url_for, flash, render_template, request
+from werkzeug.security import check_password_hash
+from sqlite3 import Row
+
 @app.route("/staff/login", methods=["GET", "POST"])
 def staff_login():
     if request.method == "POST":
@@ -2591,28 +2626,40 @@ def staff_login():
         password = request.form.get("password")
 
         conn = get_db_connection()
+        conn.row_factory = Row  # Make sure we can access by column name
+
         staff = conn.execute("SELECT * FROM staff WHERE username=?", (username,)).fetchone()
-        conn.close()
 
         if staff and check_password_hash(staff["password"], password):
-            # Angalia status
+            # Check staff status
             if staff["status"] != "ACTIVE":
                 flash("Account yako imefungwa. Wasiliana na boss wako.", "danger")
+                conn.close()
                 return redirect(url_for("staff_login"))
 
-            # ✅ Safisha session zote kwanza
+            # Check boss status
+            boss = conn.execute("SELECT status FROM boss WHERE boss_id=?", (staff["boss_id"],)).fetchone()
+            if not boss or boss["status"] != "ACTIVE":
+                flash("Boss wako si ACTIVE. Huwezi kuendelea. Wasiliana na boss wako.", "danger")
+                conn.close()
+                return redirect(url_for("staff_login"))
+
+            # Clear session
             session.clear()
 
-            # Weka session mpya
+            # Set session
             session["staff_id"] = staff["staff_id"]
             session["staff_name"] = staff["full_name"]
-            session["staff_role"] = staff["role"].lower()  # lowercase English backend-friendly
+            session["staff_role"] = staff["role"].lower()
             session["staff_boss_id"] = staff["boss_id"]
 
             flash(f"Karibu {staff['full_name']}!", "success")
+            conn.close()
             return redirect(url_for("staff_dashboard"))
 
         flash("Username au password sio sahihi.", "danger")
+        conn.close()
+        return redirect(url_for("staff_login"))
 
     return render_template("staff_login.html")
                              
