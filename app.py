@@ -406,15 +406,22 @@ def superadmin_dashboard():
     conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
+
+    # 🔹 Pata list ya bosses
     cur.execute("""
-        SELECT boss_id, full_name, username, status, signup_date, trial_end_date
+        SELECT boss_id, full_name, username, status, signup_date, trial_end_date, is_online
         FROM boss
         ORDER BY full_name
     """)
     bosses = cur.fetchall()
+
+    # 🔹 Hesabu idadi ya bosses online sasa hivi
+    cur.execute("SELECT COUNT(*) FROM boss WHERE is_online = 1")
+    online_count = cur.fetchone()[0] or 0
+
     conn.close()
 
-    # Calculate days passed, days left
+    # 🔹 Calculate days passed, days left
     today = datetime.now().date()
     boss_list = []
 
@@ -429,17 +436,51 @@ def superadmin_dashboard():
             'boss_id': b['boss_id'],
             'full_name': b['full_name'],
             'username': b['username'],
-            'status': b['status'],  # ✅ status halisi kutoka DB
+            'status': b['status'],
             'signup_date': b['signup_date'],
             'trial_end_date': b['trial_end_date'],
             'days_passed': days_passed,
             'days_left': max(days_left, 0),
-            'is_expired': today > trial_end  # ✅ mpya kwa ajili ya UI
+            'is_expired': today > trial_end,
+            'is_online': b['is_online'] == 1  # ✅ online status sasa hivi
         })
 
-    return render_template("superadmin_dashboard.html", bosses=boss_list)
+    return render_template("superadmin_dashboard.html", bosses=boss_list, online_count=online_count)
     
     
+
+
+@app.route("/superadmin/search_boss", methods=["GET"])
+def search_boss():
+    query = request.args.get("query") or ""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM boss WHERE full_name LIKE ?", ('%' + query + '%',))
+    bosses = cur.fetchall()
+    conn.close()
+    return render_template("search_boss.html", results=bosses, query=query)
+
+
+
+
+from flask import jsonify
+
+@app.route("/superadmin/online_count")
+def online_count_api():
+    if "superadmin_id" not in session:
+        return jsonify({"online_count": 0})  # kama si logged in, return 0
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM boss WHERE is_online = 1")
+    count = cur.fetchone()[0] or 0
+    cur.close()
+    conn.close()
+
+    return jsonify({"online_count": count})
+    
+        
+                
 @app.route("/super_admin/announcement", methods=["GET", "POST"])
 def create_announcement():
     # 🔹 Session key inafanana na login
@@ -629,6 +670,7 @@ def new_bosses():
     
     
 
+
     
 
 
@@ -756,6 +798,7 @@ def boss_signup():
 
 
 from datetime import datetime
+
 @app.route("/boss/login", methods=["GET", "POST"])
 def boss_login():
     """
@@ -766,7 +809,8 @@ def boss_login():
     3️⃣ Block account ikiwa imefungwa
     4️⃣ Handle RESET_PENDING temporary passwords
     5️⃣ Initialize session na announcements
-    6️⃣ Provide user-friendly and context-aware messages
+    6️⃣ Update is_online status
+    7️⃣ Provide user-friendly and context-aware messages
     """
     if request.method == "POST":
         username = request.form.get("username")
@@ -876,12 +920,16 @@ def boss_login():
             return redirect(url_for("boss_login"))
 
         # ===============================
-        # 🔹 INITIALIZE SESSION
+        # 🔹 INITIALIZE SESSION + UPDATE ONLINE STATUS
         # ===============================
         session.clear()
         session["boss_id"] = boss["boss_id"]
         session["boss_status"] = boss["status"]
         session["boss_name"] = boss["full_name"]
+
+        # 🔹 UPDATE ONLINE STATUS
+        cur.execute("UPDATE boss SET is_online = 1 WHERE boss_id = ?", (boss["boss_id"],))
+        conn.commit()
 
         # ===============================
         # 🔹 FETCH LATEST ANNOUNCEMENT
@@ -906,7 +954,7 @@ def boss_login():
         # ===============================
         if boss["status"] == "TRIAL":
             flash(
-                "Karibu ! umeanza kutumia mfumo . mara baada ya kutumia mfumo huu tafadhali tupatie maoni yako ili tuendelee kuboresha huduma zetu  (ph.0744906763).",
+                "Karibu ! umeanza kutumia mfumo. Mara baada ya kutumia mfumo huu tafadhali tupatie maoni yako ili tuendelee kuboresha huduma zetu (ph.0744906763).",
                 "info"
             )
         elif boss["status"] == "ACTIVE":
@@ -914,7 +962,9 @@ def boss_login():
 
         return redirect(url_for("boss_dashboard"))
 
-    return render_template("boss_login.html")
+    return render_template("boss_login.html")    
+    
+    
     
     
     
@@ -1312,11 +1362,21 @@ def boss_activity_logs_filter():
     )
 
 
+
 @app.route("/boss/logout")
 def boss_logout():
+    boss_id = session.get("boss_id")  # pata boss_id ya aliye login
+
+    if boss_id:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        # 🔹 UPDATE ONLINE STATUS
+        cur.execute("UPDATE boss SET is_online = 0 WHERE boss_id = ?", (boss_id,))
+        conn.commit()
+        cur.close()
+        conn.close()
 
     # 🔐 Ondoa boss_id kwenye session (kumtoa user kwenye mfumo)
-    # Hii inamaanisha boss hatakuwa tena logged in
     session.pop("boss_id", None)
 
     # 📢 Toa ujumbe wa mafanikio baada ya logout
