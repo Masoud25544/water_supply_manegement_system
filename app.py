@@ -16,6 +16,9 @@ app = Flask(__name__)
 app.secret_key = "supersecretkey"
 DB_PATH = "water_supply.db"
 
+
+
+
 # ================================
 # DATABASE SETUP FUNCTION
 # ================================
@@ -104,6 +107,12 @@ def init_db():
         # 🔹 SAFE ADD subscription_end_date COLUMN (HAIVURUGI CHOCHOTE)
         try:
             cur.execute("ALTER TABLE boss ADD COLUMN subscription_end_date TEXT;")
+        except sqlite3.OperationalError:
+            pass  # column tayari ipo
+
+        # 🔹 SAFE ADD is_online COLUMN (HAIVURUGI CHOCHOTE)
+        try:
+            cur.execute("ALTER TABLE boss ADD COLUMN is_online INTEGER DEFAULT 0;")
         except sqlite3.OperationalError:
             pass  # column tayari ipo
 
