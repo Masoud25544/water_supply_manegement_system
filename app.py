@@ -416,27 +416,36 @@ def superadmin_dashboard():
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 
-    # 🔹 Pata list ya bosses
+    # 🔹 Pata list ya bosses na dynamic online status
     cur.execute("""
-        SELECT boss_id, full_name, username, status, signup_date, trial_end_date, is_online
+        SELECT boss_id, full_name, username, status, signup_date, trial_end_date,
+               CASE 
+                   WHEN status IN ('TRIAL', 'ACTIVE') THEN 1
+                   ELSE 0
+               END AS is_online
         FROM boss
         ORDER BY full_name
     """)
-    bosses = cur.fetchall()
+    bosses = [dict(b) for b in cur.fetchall()]
 
     # 🔹 Hesabu idadi ya bosses online sasa hivi
-    cur.execute("SELECT COUNT(*) FROM boss WHERE is_online = 1")
-    online_count = cur.fetchone()[0] or 0
+    online_count = sum(1 for b in bosses if b['is_online'] == 1)
 
-    conn.close()
-
-    # 🔹 Calculate days passed, days left
+    # 🔹 Calculate days passed, days left kwa TRIAL bosses
     today = datetime.now().date()
     boss_list = []
 
     for b in bosses:
-        signup = datetime.strptime(b['signup_date'], "%Y-%m-%d %H:%M:%S").date()
-        trial_end = datetime.strptime(b['trial_end_date'], "%Y-%m-%d %H:%M:%S").date()
+        # Safely parse dates
+        try:
+            signup = datetime.strptime(b['signup_date'], "%Y-%m-%d %H:%M:%S").date()
+        except Exception:
+            signup = today
+
+        try:
+            trial_end = datetime.strptime(b['trial_end_date'], "%Y-%m-%d %H:%M:%S").date()
+        except Exception:
+            trial_end = today
 
         days_passed = (today - signup).days
         days_left = (trial_end - today).days
@@ -451,9 +460,10 @@ def superadmin_dashboard():
             'days_passed': days_passed,
             'days_left': max(days_left, 0),
             'is_expired': today > trial_end,
-            'is_online': b['is_online'] == 1  # ✅ online status sasa hivi
+            'is_online': b['is_online'] == 1  # ✅ TRIAL/ACTIVE bosses online
         })
 
+    conn.close()
     return render_template("superadmin_dashboard.html", bosses=boss_list, online_count=online_count)
     
     
@@ -768,7 +778,7 @@ def boss_signup():
         # ✅ Trial ya dakika 2 kwa testing
         trial_end_date = (now + timedelta(minutes=2)).strftime("%Y-%m-%d %H:%M:%S")
 
-        # ✅ HII NDIO MUHIMU
+        # ✅ Status ya TRIAL
         status = "TRIAL"
 
         conn = get_db_connection()
@@ -778,16 +788,17 @@ def boss_signup():
             cur.execute("""
                 INSERT INTO boss (
                     boss_id, full_name, username, password,
-                    signup_date, trial_end_date, status, created_at
+                    signup_date, trial_end_date, status, is_online, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 boss_id, full_name, username, hashed_pw,
-                signup_date, trial_end_date, status, signup_date
+                signup_date, trial_end_date, status, 1, signup_date  # ✅ is_online=1
             ))
 
             conn.commit()
 
+            # 🔹 Initialize session (boss mpya ana online)
             session['just_signed_up'] = True
             session['boss_id'] = boss_id
 
@@ -805,9 +816,7 @@ def boss_signup():
 
 
 
-
 from datetime import datetime
-
 @app.route("/boss/login", methods=["GET", "POST"])
 def boss_login():
     """
@@ -890,8 +899,9 @@ def boss_login():
         # 🔹 AUTO-EXPIRE TRIAL OR SUBSCRIPTION
         # ===============================
         if boss["status"] == "TRIAL" and trial_end and now > trial_end:
+            # 🔹 Boss imeisha TRIAL → weka INACTIVE na offline
             cur.execute(
-                "UPDATE boss SET status=? WHERE boss_id=?",
+                "UPDATE boss SET status=?, is_online=0 WHERE boss_id=?",
                 ("INACTIVE", boss["boss_id"])
             )
             conn.commit()
@@ -904,8 +914,9 @@ def boss_login():
             return redirect(url_for("boss_login"))
 
         if boss["status"] == "ACTIVE" and sub_end and now > sub_end:
+            # 🔹 Subscription imeisha → weka INACTIVE na offline
             cur.execute(
-                "UPDATE boss SET status=? WHERE boss_id=?",
+                "UPDATE boss SET status=?, is_online=0 WHERE boss_id=?",
                 ("INACTIVE", boss["boss_id"])
             )
             conn.commit()
@@ -921,6 +932,12 @@ def boss_login():
         # 🔹 BLOCK LOGIN IF MANUALLY INACTIVE
         # ===============================
         if boss["status"] == "INACTIVE":
+            # 🔹 FORCE OFFLINE
+            cur.execute(
+                "UPDATE boss SET is_online=0 WHERE boss_id=?",
+                (boss["boss_id"],)
+            )
+            conn.commit()
             conn.close()
             flash(
                 "Huduma zimesitishwa kwa sasa. Tafadhali wasiliana na support kwa msaada zaidi (ph. 0744906763).",
@@ -929,16 +946,24 @@ def boss_login():
             return redirect(url_for("boss_login"))
 
         # ===============================
-        # 🔹 INITIALIZE SESSION + UPDATE ONLINE STATUS
+        # 🔹 INITIALIZE SESSION
         # ===============================
         session.clear()
         session["boss_id"] = boss["boss_id"]
         session["boss_status"] = boss["status"]
         session["boss_name"] = boss["full_name"]
 
-        # 🔹 UPDATE ONLINE STATUS
-        cur.execute("UPDATE boss SET is_online = 1 WHERE boss_id = ?", (boss["boss_id"],))
-        conn.commit()
+        # ===============================
+        # 🔹 UPDATE ONLINE STATUS KWA KILA STATUS
+        # ===============================
+        if boss["status"] in ["TRIAL", "ACTIVE"]:
+            # 🔹 TRIAL inayoendelea au ACTIVE → online
+            cur.execute("UPDATE boss SET is_online=1 WHERE boss_id=?", (boss["boss_id"],))
+            conn.commit()
+        else:
+            # 🔹 INACTIVE → offline
+            cur.execute("UPDATE boss SET is_online=0 WHERE boss_id=?", (boss["boss_id"],))
+            conn.commit()
 
         # ===============================
         # 🔹 FETCH LATEST ANNOUNCEMENT
@@ -971,9 +996,7 @@ def boss_login():
 
         return redirect(url_for("boss_dashboard"))
 
-    return render_template("boss_login.html")    
-    
-    
+    return render_template("boss_login.html")
     
     
     
