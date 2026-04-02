@@ -28,7 +28,7 @@
 
     <!-- Search Form -->
     <form method="GET" action="{{ url_for('search_boss') }}" class="mb-4">
-        <input type="text" name="query" placeholder="Andika jina la boss..." required class="form-control mb-2" value="{{ query }}">
+        <input type="text" name="query" placeholder="Andika jina, username, phone au email..." required class="form-control mb-2" value="{{ query }}">
         <button type="submit" class="btn btn-secondary">🔍 Search</button>
     </form>
 
@@ -42,6 +42,8 @@
                     <th>#</th>
                     <th>Full Name</th>
                     <th>Username</th>
+                    <th>Phone</th>
+                    <th>Email</th>
                     <th>Status</th>
                     <th>Trial End Date</th>
                     <th>Actions</th>
@@ -53,6 +55,8 @@
                     <td>{{ loop.index }}</td>
                     <td>{{ boss['full_name'] }}</td>
                     <td>{{ boss['username'] }}</td>
+                    <td>{{ boss['phone'] or '-' }}</td>
+                    <td>{{ boss['email'] or '-' }}</td>
                     <td>
                         {% if boss['status'] == 'ACTIVE' %}
                             <span class="badge bg-success">ACTIVE</span>

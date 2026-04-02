@@ -105,10 +105,24 @@
             <label>Username</label>
             <input type="text" class="form-control" name="username" placeholder="johndoe123" required>
         </div>
+
+        <!-- 🆕 PHONE -->
+        <div class="mb-3">
+            <label>Phone Number</label>
+            <input type="text" class="form-control" name="phone" placeholder="07XXXXXXXX" required>
+        </div>
+
+        <!-- 🆕 EMAIL -->
+        <div class="mb-3">
+            <label>Email Address</label>
+            <input type="email" class="form-control" name="email" placeholder="example@email.com" required>
+        </div>
+
         <div class="mb-3">
             <label>Password</label>
             <input type="password" class="form-control" name="password" placeholder="••••••••" required>
         </div>
+
         <button type="submit" class="btn btn-primary">Sign Up</button>
         <a href="{{ url_for('boss_login') }}" class="btn btn-secondary">Already have account? Login</a>
     </form>

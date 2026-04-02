@@ -102,6 +102,8 @@
                 <th>Full Name</th>
                 <th>Username</th>
                 <th>Status</th>
+                <th>Phone</th> <!-- 🔹 Added -->
+                <th>Email</th> <!-- 🔹 Added -->
                 <th>Trial End Date</th>
                 <th>Siku Zilizotumika</th>
                 <th>Siku Zilizobaki</th>
@@ -133,6 +135,10 @@
                             <span class="badge bg-secondary">{{ boss.status }}</span>
                         {% endif %}
                     </td>
+
+                    <!-- 🔹 Phone & Email -->
+                    <td>{{ boss.phone if boss.phone is defined else '-' }}</td>
+                    <td>{{ boss.email if boss.email is defined else '-' }}</td>
 
                     <td>{{ boss.trial_end_date }}</td>
 
@@ -172,7 +178,7 @@
                 {% endfor %}
             {% else %}
                 <tr>
-                    <td colspan="8" class="text-center text-muted">
+                    <td colspan="10" class="text-center text-muted">
                         Hakuna boss wa kuonyesha au login required ⚠️
                     </td>
                 </tr>

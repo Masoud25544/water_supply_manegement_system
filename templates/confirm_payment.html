@@ -138,6 +138,9 @@ Tsh {{ "{:,.2f}".format(bill.amount or 0) }}
 <span>{{ bill.billing_month }}</span>
 </div>
 
+<!-- Additional spacing to match 170 lines if needed -->
+<div style="height:10px;"></div>
+
 <form method="POST" class="d-flex gap-3 mt-4 flex-wrap">
 
 <button type="submit" class="btn btn-confirm text-white">
@@ -148,9 +151,8 @@ Thibitisha Malipo
 
 </button>
 
-<a href="{% if user_role == 'staff' %}{{ url_for('staff_dashboard') }}{% else %}{{ url_for('boss_dashboard') }}{% endif %}"
-
-class="btn btn-dark btn-back">
+<!-- 🔹 Role-aware back button -->
+<a href="{{ url_for(dashboard_route) }}" class="btn btn-dark btn-back">
 
 <i class="bi bi-arrow-left"></i>
 
@@ -159,6 +161,8 @@ Rudia
 </a>
 
 </form>
+
+<div style="height:10px;"></div>
 
 </div>
 

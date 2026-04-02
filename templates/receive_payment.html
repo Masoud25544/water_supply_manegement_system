@@ -6,7 +6,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
 
 <style>
@@ -183,17 +182,13 @@ Thibitisha Malipo
 <div class="back">
 
 {% if user_role == "boss" %}
-
-<a href="{{ url_for('boss_dashboard') }}" class="btn btn-dark">
-<i class="bi bi-arrow-left"></i> Rudi Dashboard
+<a href="javascript:void(0);" onclick="window.history.back();" class="btn btn-dark">
+<i class="bi bi-arrow-left"></i> Rudi Nyuma
 </a>
-
 {% else %}
-
-<a href="{{ url_for('staff_dashboard') }}" class="btn btn-dark">
-<i class="bi bi-arrow-left"></i> Rudi Dashboard
+<a href="javascript:void(0);" onclick="window.history.back();" class="btn btn-dark">
+<i class="bi bi-arrow-left"></i> Rudi Nyuma
 </a>
-
 {% endif %}
 
 </div>

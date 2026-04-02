@@ -24,11 +24,30 @@ h3 {
     background: linear-gradient(135deg, #0d6efd, #3ac7ff);
     color: #fff;
     text-align: center;
+    padding: 20px 10px;
+    min-height: 90px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.report-card-unpaid {
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+    background: linear-gradient(135deg, #dc3545, #ff6b6b);
+    color: #fff;
+    text-align: center;
+    padding: 20px 10px;
+    min-height: 90px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
 }
 
 .report-card h5 {
     font-weight: 600;
-    margin-top: 5px;
+    margin: 5px 0 0 0;
+    font-size: 1.3rem;
 }
 
 .table thead {
@@ -54,6 +73,11 @@ h3 {
     font-size: 0.9rem;
 }
 
+.badge-info {
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
 button, a.btn {
     border-radius: 8px;
     font-weight: 600;
@@ -66,36 +90,41 @@ button, a.btn {
 
 <h3 class="mb-4">📊 Monthly Water Billing Report</h3>
 
-<div class="row mb-4">
-    <div class="col-md-3 mb-2">
-        <div class="card report-card p-3">
+<!-- Summary Cards -->
+<div class="row mb-4 g-3 text-center">
+    <div class="col-6 col-md-2">
+        <div class="report-card">
             <b>Mwezi</b>
             <h5>{{ month }}</h5>
         </div>
     </div>
-
-    <div class="col-md-3 mb-2">
-        <div class="card report-card p-3">
+    <div class="col-6 col-md-2">
+        <div class="report-card">
             <b>Total Units</b>
             <h5>{{ total_units }}</h5>
         </div>
     </div>
-
-    <div class="col-md-3 mb-2">
-        <div class="card report-card p-3">
+    <div class="col-6 col-md-2">
+        <div class="report-card">
             <b>Total Income</b>
-            <h5>{{ total_amount }} TZS</h5>
+            <h5>{{ total_paid_amount }} TZS</h5>
         </div>
     </div>
-
-    <div class="col-md-3 mb-2">
-        <div class="card report-card p-3">
+    <div class="col-6 col-md-2">
+        <div class="report-card">
             <b>Paid Bills</b>
             <h5>{{ paid_count }}</h5>
         </div>
     </div>
+    <div class="col-6 col-md-2">
+        <div class="report-card-unpaid">
+            <b>Unpaid Bills</b>
+            <h5>{{ unpaid_count }}</h5>
+        </div>
+    </div>
 </div>
 
+<!-- Detailed Bills Table -->
 <table class="table table-bordered table-striped align-middle">
     <thead>
         <tr>
@@ -120,6 +149,8 @@ button, a.btn {
             <td>
                 {% if b.status.upper() == "PAID" %}
                     <span class="badge bg-success">PAID</span>
+                {% elif b.status.upper() == "BASELINE" %}
+                    <span class="badge bg-info">NEW METER</span>
                 {% else %}
                     <span class="badge bg-danger">UNPAID</span>
                 {% endif %}
@@ -131,7 +162,7 @@ button, a.btn {
     </tbody>
 </table>
 
-<div class="mt-3 mb-4 d-flex gap-2">
+<div class="mt-3 mb-4 d-flex gap-2 flex-wrap">
     <button onclick="window.print()" class="btn btn-primary">
         🖨 Print Report
     </button>

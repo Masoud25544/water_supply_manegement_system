@@ -1,3 +1,6 @@
+# =======================
+# 1️⃣ Imports Kamili
+# =======================
 from flask import Flask, render_template, request, redirect, url_for, flash, session
 from werkzeug.security import generate_password_hash, check_password_hash
 import sqlite3
@@ -15,6 +18,57 @@ def generate_staff_id():
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
 DB_PATH = "water_supply.db"
+
+
+def check_trial_expiry(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        boss_id = session.get("boss_id")
+        if not boss_id:
+            return redirect(url_for("boss_login"))
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT status, trial_end_date, subscription_end_date FROM boss WHERE boss_id = ?", (boss_id,))
+        boss = cur.fetchone()
+        conn.close()
+
+        now = datetime.now()
+
+        # 🔹 TRIAL check
+        if boss and boss["status"] == "TRIAL" and boss["trial_end_date"]:
+            try:
+                trial_end = datetime.strptime(boss["trial_end_date"], "%Y-%m-%d %H:%M:%S")
+            except:
+                trial_end = now
+            if now > trial_end:
+                conn = get_db_connection()
+                cur = conn.cursor()
+                cur.execute("UPDATE boss SET status='INACTIVE', is_online=0 WHERE boss_id=?", (boss_id,))
+                conn.commit()
+                conn.close()
+                session.clear()
+                flash("Trial yako imeisha. Tafadhali wasiliana na admin.", "danger")
+                return redirect(url_for("boss_login"))
+
+        # 🔹 SUBSCRIPTION check
+        if boss and boss["status"] == "ACTIVE" and boss["subscription_end_date"]:
+            try:
+                sub_end = datetime.strptime(boss["subscription_end_date"], "%Y-%m-%d %H:%M:%S")
+            except:
+                sub_end = now
+            if now > sub_end:
+                conn = get_db_connection()
+                cur = conn.cursor()
+                cur.execute("UPDATE boss SET status='INACTIVE', is_online=0 WHERE boss_id=?", (boss_id,))
+                conn.commit()
+                conn.close()
+                session.clear()
+                flash("Subscription yako imeisha. Tafadhali lipa ili kuendelea.", "danger")
+                return redirect(url_for("boss_login"))
+
+        return f(*args, **kwargs)
+    return decorated_function
 
 
 
@@ -113,6 +167,18 @@ def init_db():
         # 🔹 SAFE ADD is_online COLUMN (HAIVURUGI CHOCHOTE)
         try:
             cur.execute("ALTER TABLE boss ADD COLUMN is_online INTEGER DEFAULT 0;")
+        except sqlite3.OperationalError:
+            pass  # column tayari ipo
+
+        # 🆕 🔹 SAFE ADD phone COLUMN (MPYA)
+        try:
+            cur.execute("ALTER TABLE boss ADD COLUMN phone TEXT;")
+        except sqlite3.OperationalError:
+            pass  # column tayari ipo
+
+        # 🆕 🔹 SAFE ADD email COLUMN (MPYA)
+        try:
+            cur.execute("ALTER TABLE boss ADD COLUMN email TEXT;")
         except sqlite3.OperationalError:
             pass  # column tayari ipo
 
@@ -326,6 +392,8 @@ def init_db():
 init_db()
 
 
+
+
 # ================================
 # INIT DATABASE ROUTE (kwa testing)
 # ================================
@@ -416,9 +484,9 @@ def superadmin_dashboard():
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 
-    # 🔹 Pata list ya bosses na dynamic online status
+    # 🔹 Pata list ya bosses na dynamic online status, pia phone + email
     cur.execute("""
-        SELECT boss_id, full_name, username, status, signup_date, trial_end_date,
+        SELECT boss_id, full_name, username, status, signup_date, trial_end_date, phone, email,
                CASE 
                    WHEN status IN ('TRIAL', 'ACTIVE') THEN 1
                    ELSE 0
@@ -460,12 +528,13 @@ def superadmin_dashboard():
             'days_passed': days_passed,
             'days_left': max(days_left, 0),
             'is_expired': today > trial_end,
-            'is_online': b['is_online'] == 1  # ✅ TRIAL/ACTIVE bosses online
+            'is_online': b['is_online'] == 1,  # ✅ TRIAL/ACTIVE bosses online
+            'phone': b.get('phone', ''),       # 🔹 Add phone
+            'email': b.get('email', '')        # 🔹 Add email
         })
 
     conn.close()
     return render_template("superadmin_dashboard.html", bosses=boss_list, online_count=online_count)
-    
     
 
 
@@ -473,12 +542,22 @@ def superadmin_dashboard():
 def search_boss():
     query = request.args.get("query") or ""
     conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
     cur = conn.cursor()
-    cur.execute("SELECT * FROM boss WHERE full_name LIKE ?", ('%' + query + '%',))
-    bosses = cur.fetchall()
+
+    # 🔹 Search in multiple columns: full_name, username, phone, email
+    cur.execute("""
+        SELECT * FROM boss
+        WHERE full_name LIKE ?
+           OR username LIKE ?
+           OR phone LIKE ?
+           OR email LIKE ?
+        ORDER BY full_name
+    """, ('%' + query + '%', '%' + query + '%', '%' + query + '%', '%' + query + '%'))
+
+    bosses = [dict(b) for b in cur.fetchall()]
     conn.close()
     return render_template("search_boss.html", results=bosses, query=query)
-
 
 
 
@@ -753,7 +832,27 @@ def toggle_boss(boss_id):
 def superadmin_logout():
     session.pop("superadmin_id", None)
     flash("Umetoka kwenye mfumo", "info")
-    return redirect(url_for("superadmin_login"))                
+    return redirect(url_for("superadmin_login"))    
+    
+                
+                            
+# =============================
+# AUTO-APPLY DECORATOR KWA ROUTES ZA BOSS
+# =============================
+from flask import Flask
+from functools import wraps
+
+# Hii function itachunguza kama route ni ya boss na kui-wrap na decorator
+def apply_trial_decorator(app, decorator):
+    for rule in app.url_map.iter_rules():
+        if rule.endpoint.startswith("boss_"):  # Routes zote za boss zinapaswa kuanza na "boss_"
+            view_func = app.view_functions[rule.endpoint]
+            app.view_functions[rule.endpoint] = decorator(view_func)
+
+# Baada ya ku-define routes zote za boss, run:
+apply_trial_decorator(app, check_trial_expiry)                                        
+                                                    
+                                                                            
                     
                             
 
@@ -768,6 +867,10 @@ def boss_signup():
         full_name = request.form.get("full_name")
         username = request.form.get("username")
         password = request.form.get("password")
+
+        # 🆕 GET PHONE & EMAIL
+        phone = request.form.get("phone")
+        email = request.form.get("email")
 
         boss_id = "BOSS-" + str(uuid.uuid4())[:8]
         hashed_pw = generate_password_hash(password)
@@ -785,15 +888,24 @@ def boss_signup():
         cur = conn.cursor()
 
         try:
+            # 🆕 CHECK DUPLICATE EMAIL / PHONE
+            cur.execute("SELECT * FROM boss WHERE email = ? OR phone = ?", (email, phone))
+            existing = cur.fetchone()
+            if existing:
+                flash("Email au namba ya simu tayari imetumika.", "danger")
+                return redirect(url_for("boss_signup"))
+
             cur.execute("""
                 INSERT INTO boss (
                     boss_id, full_name, username, password,
-                    signup_date, trial_end_date, status, is_online, created_at
+                    signup_date, trial_end_date, status, is_online, created_at,
+                    phone, email
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 boss_id, full_name, username, hashed_pw,
-                signup_date, trial_end_date, status, 1, signup_date  # ✅ is_online=1
+                signup_date, trial_end_date, status, 1, signup_date,  # ✅ is_online=1
+                phone, email
             ))
 
             conn.commit()
@@ -811,8 +923,6 @@ def boss_signup():
             conn.close()
 
     return render_template("boss_signup.html")
-
-
 
 
 
@@ -1105,6 +1215,7 @@ from flask import render_template, session, redirect, url_for, flash
 import sqlite3
 
 @app.route("/boss_dashboard")
+@check_trial_expiry   # 🔹 Hii inachunguza TRIAL expiry kabla ya ku-render dashboard
 def boss_dashboard():
     import sqlite3
     from datetime import datetime, date
@@ -1689,6 +1800,7 @@ def delete_customer(customer_id):
         return redirect(url_for("boss_dashboard"))
     
 # ================= READ METER =====================
+
 @app.route("/read_meter", methods=["GET", "POST"])
 def read_meter():
 
@@ -1824,7 +1936,14 @@ def read_meter():
             WHERE boss_id=? ORDER BY created_at DESC LIMIT 1
         """, (boss_id,))
         tariff = cur.fetchone()
-        price_per_unit = tariff["price_per_unit"] if tariff else 0
+
+        # 🔹 SAFEGUARD: Hakuna tariff hauruhusiwi kuunda bill
+        if not tariff:
+            flash("⚠️ Hakuna tariff iliyowekwa. Tafadhali weka price per unit kwanza.", "danger")
+            conn.close()
+            return render_template("read_meter.html", bill=None)
+
+        price_per_unit = tariff["price_per_unit"]
 
         amount = units_used * price_per_unit
         bill_id = "BILL-" + str(uuid.uuid4())[:8]
@@ -1862,6 +1981,10 @@ def read_meter():
         flash(f"✅ Bill imejengwa kwa {meter_number} ({meter['full_name']})", "success")
 
     return render_template("read_meter.html", bill=bill)
+
+
+
+
 
 @app.route("/boss/meters")
 def boss_meters():
@@ -2377,30 +2500,32 @@ def toggle_customer(customer_id):
     
     
 # ================= RECEIVE PAYMENT =====================
+
 @app.route("/receive_payment/<bill_id>", methods=["GET", "POST"])
 def receive_payment(bill_id):
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    # 1️⃣ Hakikisha ameloga
-    if "staff_id" not in session and "boss_id" not in session:
-        flash("Tafadhali login kwanza", "danger")
-        return redirect(url_for("boss_login"))
-
-    # 2️⃣ Amua role na user_id
+    # 1️⃣ Role-based login check
     if "staff_id" in session:
         user_role = "staff"
         user_id = session["staff_id"]
-        boss_id_for_record = session.get("staff_boss_id")  # boss sahihi kwa staff
+        dashboard_route = "staff_dashboard"
         user_name = session.get("staff_name")
-    else:
+        boss_id_for_record = session.get("staff_boss_id")
+    elif "boss_id" in session:
         user_role = "boss"
         user_id = session["boss_id"]
-        boss_id_for_record = user_id  # kwa boss, boss_id = user_id
+        dashboard_route = "boss_dashboard"
         user_name = session.get("boss_name")
+        boss_id_for_record = user_id
+    else:
+        flash("Tafadhali login kwanza", "danger")
+        # Default fallback kwa staff login
+        return redirect(url_for("staff_login"))
 
-    # 2.1️⃣ Kagua status ya boss
+    # 2️⃣ Kagua status ya boss
     boss_status = cursor.execute(
         "SELECT status FROM boss WHERE boss_id=?", 
         (boss_id_for_record,)
@@ -2409,15 +2534,12 @@ def receive_payment(bill_id):
     if not boss_status:
         conn.close()
         flash("Boss haipo kwenye mfumo", "danger")
-        return redirect(url_for("boss_login"))
+        return redirect(url_for(dashboard_route))
 
     if boss_status["status"] != "ACTIVE":
         conn.close()
         flash("Hauwezi kufanya malipo: Akaunti ya boss imezuiliwa", "danger")
-        if user_role == "staff":
-            return redirect(url_for("staff_dashboard"))
-        else:
-            return redirect(url_for("boss_dashboard"))
+        return redirect(url_for(dashboard_route))
 
     # 3️⃣ Pata bill info
     bill = cursor.execute("""
@@ -2432,10 +2554,7 @@ def receive_payment(bill_id):
     if not bill:
         conn.close()
         flash("Bili haipo", "danger")
-        if user_role == "staff":
-            return redirect(url_for("staff_dashboard"))
-        else:
-            return redirect(url_for("boss_dashboard"))
+        return redirect(url_for(dashboard_route))
 
     # 4️⃣ POST: process payment
     if request.method == "POST":
@@ -2446,8 +2565,6 @@ def receive_payment(bill_id):
         year = datetime.now().year
         count = cursor.execute("SELECT COUNT(*) FROM receipts").fetchone()[0] + 1
         receipt_number = f"RCP-{year}-{str(count).zfill(5)}"
-
-        # 🔹 Muda mmoja wa sasa
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         # ✅ Insert payment
@@ -2488,7 +2605,7 @@ def receive_payment(bill_id):
             now
         ))
 
-        # ✅ Record activity log with boss_id and time
+        # ✅ Record activity log
         cursor.execute("""
             INSERT INTO activity_logs (user_name, role, action, details, boss_id, time)
             VALUES (?, ?, ?, ?, ?, ?)
@@ -2509,8 +2626,9 @@ def receive_payment(bill_id):
 
     # 5️⃣ GET: show confirmation page
     conn.close()
-    return render_template("confirm_payment.html", bill=bill)
-    
+    return render_template("confirm_payment.html", bill=bill, dashboard_route=dashboard_route)
+
+
 @app.route("/receipt/<receipt_id>")
 def view_receipt(receipt_id):
     # Hakikisha user ameloga
