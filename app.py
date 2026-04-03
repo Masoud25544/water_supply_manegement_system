@@ -24,57 +24,56 @@ app.secret_key = "supersecretkey"
 # =======================
 # 2️⃣ Database Setup
 # =======================
-# Angalia environment variable ya DB_PATH (PostgreSQL URL) kwanza
-db_url = os.getenv("DB_PATH")  # Hii environment variable lazima iwe set kwenye Render
+IS_POSTGRES = bool(os.getenv("DATABASE_URL"))
+DB_URL = os.getenv("DATABASE_URL") if IS_POSTGRES else None
+SQLITE_DB_PATH = "water_supply.db"
 
-if db_url:
-    # =======================
-    # PostgreSQL kwa Render
-    # =======================
-    print("Using PostgreSQL")
-    import psycopg2
-
-    def get_db_connection():
-        """Return a PostgreSQL connection using environment variable"""
-        try:
-            conn = psycopg2.connect(db_url)
+def get_db_connection():
+    try:
+        if IS_POSTGRES:
+            import psycopg2
+            conn = psycopg2.connect(DB_URL, sslmode="require")
             return conn
-        except Exception as e:
-            print("PostgreSQL connection error:", e)
-            return None
-else:
-    # =======================
-    # SQLite local kwa Pydroid au development
-    # =======================
-    print("Using SQLite")
-    SQLITE_DB_PATH = "water_supply.db"  # Hakuna NameError, inatumika tu SQLite
-
-    def get_db_connection():
-        """Return a SQLite connection"""
-        try:
+        else:
             conn = sqlite3.connect(SQLITE_DB_PATH)
             conn.row_factory = sqlite3.Row
             return conn
-        except Exception as e:
-            print("SQLite connection error:", e)
-            return None
+    except Exception as e:
+        print("DB connection error:", e)
+        return None
 
 print("Database setup complete (FULL VERSION - NO REDUCTION)")
 
 # =======================
-# 3️⃣ Decorators & Helpers
+# 3️⃣ Helpers
 # =======================
-def check_trial_expiry(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        boss_id = session.get("boss_id")
-        if not boss_id:
-            return redirect(url_for("boss_login"))
-        return f(*args, **kwargs)
-    return decorated_function
+def run_query(cur, query, params=()):
+    """Universal query runner, handles SQLite vs PostgreSQL placeholders"""
+    if IS_POSTGRES:
+        query = query.replace("?", "%s")
+    cur.execute(query, params)
 
+def safe_add_column(cur, table, column_def):
+    try:
+        if IS_POSTGRES:
+            # PostgreSQL: check if column exists
+            table_name = table.lower()
+            col_name = column_def.split()[0].lower()
+            cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name=%s AND column_name=%s", (table_name, col_name))
+            if cur.fetchone() is None:
+                cur.execute(f"ALTER TABLE {table} ADD COLUMN {column_def}")
+        else:
+            # SQLite
+            cur.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column_def}")
+    except:
+        pass
 
+def generate_id(prefix):
+    return f"{prefix}-{str(uuid.uuid4())[:8]}"
 
+# =======================
+# 4️⃣ Decorators
+# =======================
 def check_trial_expiry(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -84,38 +83,51 @@ def check_trial_expiry(f):
 
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("SELECT status, trial_end_date, subscription_end_date FROM boss WHERE boss_id = ?", (boss_id,))
+        run_query(cur,
+            "SELECT status, trial_end_date, subscription_end_date FROM boss WHERE boss_id = ?",
+            (boss_id,)
+        )
         boss = cur.fetchone()
         conn.close()
 
+        if not boss:
+            return redirect(url_for("boss_login"))
+
+        if IS_POSTGRES:
+            status, trial_end_date, subscription_end_date = boss
+        else:
+            status = boss["status"]
+            trial_end_date = boss["trial_end_date"]
+            subscription_end_date = boss["subscription_end_date"]
+
         now = datetime.now()
 
-        # 🔹 TRIAL check
-        if boss and boss["status"] == "TRIAL" and boss["trial_end_date"]:
+        # 🔹 TRIAL
+        if status == "TRIAL" and trial_end_date:
             try:
-                trial_end = datetime.strptime(boss["trial_end_date"], "%Y-%m-%d %H:%M:%S")
+                trial_end = datetime.strptime(str(trial_end_date), "%Y-%m-%d %H:%M:%S")
             except:
                 trial_end = now
             if now > trial_end:
                 conn = get_db_connection()
                 cur = conn.cursor()
-                cur.execute("UPDATE boss SET status='INACTIVE', is_online=0 WHERE boss_id=?", (boss_id,))
+                run_query(cur, "UPDATE boss SET status='INACTIVE', is_online=0 WHERE boss_id=?", (boss_id,))
                 conn.commit()
                 conn.close()
                 session.clear()
                 flash("Trial yako imeisha. Tafadhali wasiliana na admin.", "danger")
                 return redirect(url_for("boss_login"))
 
-        # 🔹 SUBSCRIPTION check
-        if boss and boss["status"] == "ACTIVE" and boss["subscription_end_date"]:
+        # 🔹 SUBSCRIPTION
+        if status == "ACTIVE" and subscription_end_date:
             try:
-                sub_end = datetime.strptime(boss["subscription_end_date"], "%Y-%m-%d %H:%M:%S")
+                sub_end = datetime.strptime(str(subscription_end_date), "%Y-%m-%d %H:%M:%S")
             except:
                 sub_end = now
             if now > sub_end:
                 conn = get_db_connection()
                 cur = conn.cursor()
-                cur.execute("UPDATE boss SET status='INACTIVE', is_online=0 WHERE boss_id=?", (boss_id,))
+                run_query(cur, "UPDATE boss SET status='INACTIVE', is_online=0 WHERE boss_id=?", (boss_id,))
                 conn.commit()
                 conn.close()
                 session.clear()
@@ -125,108 +137,37 @@ def check_trial_expiry(f):
         return f(*args, **kwargs)
     return decorated_function
 
-
-
-
-# ================================
-# DATABASE SETUP FUNCTION
-# ================================
-
-
-# =====================================================
-# 🔥 UNIVERSAL HELPERS
-# =====================================================
-def generate_id(prefix):
-    return f"{prefix}-{uuid.uuid4()}"
-
-def format_query(query, is_postgres):
-    if is_postgres:
-        query = query.replace("AUTOINCREMENT", "")
-    return query
-
-def execute_query(cur, query, params=(), is_postgres=False):
-    query = format_query(query, is_postgres)
-
-    if is_postgres:
-        query = query.replace("?", "%s")
-
-    # 🔥 FIX: params normalization
-    if params is None:
-        params = ()
-
-    if not isinstance(params, (list, tuple)):
-        params = (params,)
-
-    # 🔥 FIX KUBWA: kama hakuna placeholders usipeleke params
-    if ("?" not in query) and ("%s" not in query):
-        cur.execute(query)
-    else:
-        cur.execute(query, params)
-
-def safe_add_column(cur, table, column_def):
-    try:
-        cur.execute(f"ALTER TABLE {table} ADD COLUMN {column_def}")
-    except:
-        pass
-
-
-# =====================================================
-# =====================================================
-# INIT DB
-# =====================================================
+# =======================
+# 5️⃣ Database Init
+# =======================
 def init_db():
-    global DB_PATH  # Hakikisha tunatumia global DB_PATH
+    global DB_PATH
     try:
-        import uuid
-        from datetime import datetime
-        from werkzeug.security import generate_password_hash
-        import traceback
-
-        # Angalia environment variable ya DB_PATH (PostgreSQL URL)
-        db_url = os.getenv("DB_PATH")
-        if db_url:
-            DB_PATH = db_url
+        if IS_POSTGRES:
+            DB_PATH = DB_URL
+            import psycopg2
+            conn = psycopg2.connect(DB_URL, sslmode="require")
+            cur = conn.cursor()
             is_postgres = True
         else:
-            DB_PATH = "water_supply.db"
-            is_postgres = False
-
-        # =======================
-        # Fungua connection
-        # =======================
-        if is_postgres:
-            import psycopg2
-            print("Using PostgreSQL for DB setup")
-            conn = psycopg2.connect(DB_PATH, sslmode="require")
-            cur = conn.cursor()
-        else:
+            DB_PATH = SQLITE_DB_PATH
             import sqlite3
-            print("Using SQLite for DB setup")
             conn = sqlite3.connect(DB_PATH)
             conn.row_factory = sqlite3.Row
             cur = conn.cursor()
+            is_postgres = False
 
-        # =======================
-        # Helper Functions
-        # =======================
+        # Helper
         def execute_query(cursor, query, params=None):
             if params:
-                cursor.execute(query, params)
+                run_query(cursor, query, params)
             else:
-                cursor.execute(query)
+                run_query(cursor, query)
 
-        def safe_add_column(cursor, table_name, column_def):
-            try:
-                cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {column_def}")
-            except:
-                pass
-
-        def generate_id(prefix):
-            return f"{prefix}-{str(uuid.uuid4())[:8]}"
-
+        # =======================
+        # Tables
         # =======================
         # SUPER ADMIN
-        # =======================
         execute_query(cur, """
         CREATE TABLE IF NOT EXISTS super_admin (
             admin_id TEXT PRIMARY KEY,
@@ -235,34 +176,24 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """)
-
         default_admin_id = generate_id("ADMIN")
-
         if is_postgres:
-            cur.execute("""
+            run_query(cur, """
             INSERT INTO super_admin (admin_id, username, password, created_at)
             VALUES (%s, %s, %s, %s)
             ON CONFLICT (username) DO NOTHING
             """, (
-                default_admin_id,
-                "admin",
-                generate_password_hash("1234"),
-                datetime.now()
+                default_admin_id, "admin", generate_password_hash("1234"), datetime.now()
             ))
         else:
             execute_query(cur, """
             INSERT OR IGNORE INTO super_admin (admin_id, username, password, created_at)
             VALUES (?, ?, ?, ?)
             """, (
-                default_admin_id,
-                "admin",
-                generate_password_hash("1234"),
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                default_admin_id, "admin", generate_password_hash("1234"), datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             ))
 
-        # =======================
         # ANNOUNCEMENTS
-        # =======================
         execute_query(cur, """
         CREATE TABLE IF NOT EXISTS announcements (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -273,9 +204,7 @@ def init_db():
         """)
         safe_add_column(cur, "announcements", "created_by TEXT")
 
-        # =======================
         # ANNOUNCEMENT READS
-        # =======================
         execute_query(cur, """
         CREATE TABLE IF NOT EXISTS announcement_reads (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -295,7 +224,6 @@ def init_db():
 
         # =======================
         # BOSS
-        # =======================
         execute_query(cur, """
         CREATE TABLE IF NOT EXISTS boss (
             boss_id TEXT PRIMARY KEY,
@@ -313,7 +241,6 @@ def init_db():
 
         # =======================
         # STAFF
-        # =======================
         execute_query(cur, """
         CREATE TABLE IF NOT EXISTS staff (
             staff_id TEXT PRIMARY KEY,
@@ -331,7 +258,6 @@ def init_db():
 
         # =======================
         # CUSTOMERS
-        # =======================
         execute_query(cur, """
         CREATE TABLE IF NOT EXISTS customers (
             customer_id TEXT PRIMARY KEY,
@@ -350,7 +276,6 @@ def init_db():
 
         # =======================
         # METERS
-        # =======================
         execute_query(cur, """
         CREATE TABLE IF NOT EXISTS meters (
             meter_id TEXT PRIMARY KEY,
@@ -364,7 +289,6 @@ def init_db():
 
         # =======================
         # TARIFFS
-        # =======================
         execute_query(cur, """
         CREATE TABLE IF NOT EXISTS tariffs (
             tariff_id TEXT PRIMARY KEY,
@@ -377,7 +301,6 @@ def init_db():
 
         # =======================
         # MASTER METER
-        # =======================
         execute_query(cur, """
         CREATE TABLE IF NOT EXISTS master_meter (
             master_id TEXT PRIMARY KEY,
@@ -389,9 +312,7 @@ def init_db():
         )
         """)
 
-        # =======================
         # MASTER METER READINGS
-        # =======================
         execute_query(cur, """
         CREATE TABLE IF NOT EXISTS master_meter_readings (
             reading_id TEXT PRIMARY KEY,
@@ -403,9 +324,7 @@ def init_db():
         )
         """)
 
-        # =======================
         # METER READINGS
-        # =======================
         execute_query(cur, """
         CREATE TABLE IF NOT EXISTS meter_readings (
             reading_id TEXT PRIMARY KEY,
@@ -418,9 +337,7 @@ def init_db():
         )
         """)
 
-        # =======================
         # BILLS
-        # =======================
         execute_query(cur, """
         CREATE TABLE IF NOT EXISTS bills (
             bill_id TEXT PRIMARY KEY,
@@ -440,9 +357,7 @@ def init_db():
         )
         """)
 
-        # =======================
         # PAYMENTS
-        # =======================
         execute_query(cur, """
         CREATE TABLE IF NOT EXISTS payments (
             payment_id TEXT PRIMARY KEY,
@@ -460,9 +375,7 @@ def init_db():
         )
         """)
 
-        # =======================
         # RECEIPTS
-        # =======================
         execute_query(cur, """
         CREATE TABLE IF NOT EXISTS receipts (
             receipt_id TEXT PRIMARY KEY,
@@ -480,9 +393,7 @@ def init_db():
         )
         """)
 
-        # =======================
         # ACTIVITY LOGS
-        # =======================
         execute_query(cur, """
         CREATE TABLE IF NOT EXISTS activity_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -495,9 +406,7 @@ def init_db():
         )
         """)
 
-        # =======================
         # ANDROID METADATA
-        # =======================
         execute_query(cur, """
         CREATE TABLE IF NOT EXISTS android_metadata (
             locale TEXT
