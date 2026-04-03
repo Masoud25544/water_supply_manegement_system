@@ -140,7 +140,6 @@ def check_trial_expiry(f):
 # =======================
 # ⃣ Database Init
 # =======================
-
 def init_db():
     try:
         if IS_POSTGRES:
@@ -915,38 +914,39 @@ def boss_signup():
         trial_end_date = (now + timedelta(minutes=2)).strftime("%Y-%m-%d %H:%M:%S")
         status = "TRIAL"
 
-        conn = None  # 🔹 Initialize connection variable
+        conn = None
         try:
             conn = get_db_connection()
             cur = conn.cursor()
 
-            cur.execute("SELECT * FROM boss WHERE email = %s OR phone = %s" if DB_URL else "SELECT * FROM boss WHERE email = ? OR phone = ?", 
-                        (email, phone))
+            # 🔹 Determine environment
+            is_postgres = bool(DB_URL)
 
+            # 🔹 Placeholder logic
+            placeholder = "%s" if is_postgres else "?"
+
+            # 🔹 Check if email/phone exists
+            select_sql = f"SELECT * FROM boss WHERE email = {placeholder} OR phone = {placeholder}"
+            cur.execute(select_sql, (email, phone))
             existing = cur.fetchone()
             if existing:
                 flash("Email au namba ya simu tayari imetumika.", "danger")
                 return redirect(url_for("boss_signup"))
 
-            cur.execute("""
+            # 🔹 Insert query
+            insert_sql = f"""
                 INSERT INTO boss (
                     boss_id, full_name, username, password,
                     signup_date, trial_end_date, status, is_online, created_at,
                     phone, email
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """ if DB_URL else """
-                INSERT INTO boss (
-                    boss_id, full_name, username, password,
-                    signup_date, trial_end_date, status, is_online, created_at,
-                    phone, email
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (boss_id, full_name, username, hashed_pw,
-                 signup_date, trial_end_date, status, 1, signup_date,
-                 phone, email)
-            )
+                VALUES ({', '.join([placeholder]*11)})
+            """
+            cur.execute(insert_sql, (
+                boss_id, full_name, username, hashed_pw,
+                signup_date, trial_end_date, status, 1, signup_date,
+                phone, email
+            ))
 
             conn.commit()
             session['just_signed_up'] = True
@@ -956,10 +956,12 @@ def boss_signup():
 
         except Exception as e:
             print("❌ Boss signup error:", e)
+            import traceback
+            traceback.print_exc()
             flash("Tatizo limetokea. Jaribu tena.", "danger")
 
         finally:
-            if conn:  # 🔹 Close only if connection exists
+            if conn:
                 conn.close()
 
     return render_template("boss_signup.html")
