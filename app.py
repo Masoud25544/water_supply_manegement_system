@@ -138,34 +138,29 @@ def check_trial_expiry(f):
     return decorated_function
 
 # =======================
-# 5️⃣ Database Init
+# ⃣ Database Init
 # =======================
+
 def init_db():
-    global DB_PATH
     try:
         if IS_POSTGRES:
-            DB_PATH = DB_URL
             import psycopg2
             conn = psycopg2.connect(DB_URL, sslmode="require")
             cur = conn.cursor()
             is_postgres = True
         else:
-            DB_PATH = SQLITE_DB_PATH
             import sqlite3
-            conn = sqlite3.connect(DB_PATH)
+            conn = sqlite3.connect(SQLITE_DB_PATH)
             conn.row_factory = sqlite3.Row
             cur = conn.cursor()
             is_postgres = False
 
-        # Helper
         def execute_query(cursor, query, params=None):
             if params:
                 run_query(cursor, query, params)
             else:
                 run_query(cursor, query)
 
-        # =======================
-        # Tables
         # =======================
         # SUPER ADMIN
         execute_query(cur, """
@@ -183,20 +178,21 @@ def init_db():
             VALUES (%s, %s, %s, %s)
             ON CONFLICT (username) DO NOTHING
             """, (
-                default_admin_id, "admin", generate_password_hash("1234"), datetime.now()
+                default_admin_id, "admin", "1234", datetime.now()
             ))
         else:
             execute_query(cur, """
             INSERT OR IGNORE INTO super_admin (admin_id, username, password, created_at)
             VALUES (?, ?, ?, ?)
             """, (
-                default_admin_id, "admin", generate_password_hash("1234"), datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                default_admin_id, "admin", "1234", datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             ))
 
+        # =======================
         # ANNOUNCEMENTS
-        execute_query(cur, """
+        execute_query(cur, f"""
         CREATE TABLE IF NOT EXISTS announcements (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {"SERIAL" if is_postgres else "INTEGER PRIMARY KEY AUTOINCREMENT"},
             title TEXT NOT NULL,
             message TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -204,10 +200,11 @@ def init_db():
         """)
         safe_add_column(cur, "announcements", "created_by TEXT")
 
+        # =======================
         # ANNOUNCEMENT READS
-        execute_query(cur, """
+        execute_query(cur, f"""
         CREATE TABLE IF NOT EXISTS announcement_reads (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {"SERIAL" if is_postgres else "INTEGER PRIMARY KEY AUTOINCREMENT"},
             announcement_id TEXT NOT NULL,
             boss_id TEXT NOT NULL,
             is_read INTEGER DEFAULT 0,
@@ -394,9 +391,9 @@ def init_db():
         """)
 
         # ACTIVITY LOGS
-        execute_query(cur, """
+        execute_query(cur, f"""
         CREATE TABLE IF NOT EXISTS activity_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {"SERIAL" if is_postgres else "INTEGER PRIMARY KEY AUTOINCREMENT"},
             user_name TEXT,
             role TEXT,
             action TEXT,
@@ -428,6 +425,14 @@ def init_db():
 
 # 🚀 RUN
 init_db()
+
+
+
+
+
+
+
+
 # ================================
 # INIT DATABASE ROUTE (kwa testing)
 # ================================
