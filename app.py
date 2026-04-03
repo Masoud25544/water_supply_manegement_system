@@ -898,31 +898,23 @@ from datetime import datetime, timedelta
 @app.route("/boss/signup", methods=["GET", "POST"])
 def boss_signup():
     if request.method == "POST":
-        full_name = request.form.get("full_name")
-        username = request.form.get("username")
-        password = request.form.get("password")
-
-        # 🆕 GET PHONE & EMAIL
-        phone = request.form.get("phone")
-        email = request.form.get("email")
-
-        boss_id = "BOSS-" + str(uuid.uuid4())[:8]
-        hashed_pw = generate_password_hash(password)
-
-        now = datetime.now()
-
-        signup_date = now.strftime("%Y-%m-%d %H:%M:%S")
-        # ✅ Trial ya dakika 2 kwa testing
-        trial_end_date = (now + timedelta(minutes=2)).strftime("%Y-%m-%d %H:%M:%S")
-
-        # ✅ Status ya TRIAL
-        status = "TRIAL"
-
-        conn = get_db_connection()
-        cur = conn.cursor()
-
         try:
-            # 🆕 CHECK DUPLICATE EMAIL / PHONE
+            full_name = request.form.get("full_name")
+            username = request.form.get("username")
+            password = request.form.get("password")
+            phone = request.form.get("phone")
+            email = request.form.get("email")
+
+            boss_id = "BOSS-" + str(uuid.uuid4())[:8]
+            hashed_pw = generate_password_hash(password)
+            now = datetime.now()
+            signup_date = now.strftime("%Y-%m-%d %H:%M:%S")
+            trial_end_date = (now + timedelta(minutes=2)).strftime("%Y-%m-%d %H:%M:%S")
+            status = "TRIAL"
+
+            conn = get_db_connection()
+            cur = conn.cursor()
+
             cur.execute("SELECT * FROM boss WHERE email = ? OR phone = ?", (email, phone))
             existing = cur.fetchone()
             if existing:
@@ -938,26 +930,24 @@ def boss_signup():
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 boss_id, full_name, username, hashed_pw,
-                signup_date, trial_end_date, status, 1, signup_date,  # ✅ is_online=1
+                signup_date, trial_end_date, status, 1, signup_date,
                 phone, email
             ))
 
             conn.commit()
-
-            # 🔹 Initialize session (boss mpya ana online)
             session['just_signed_up'] = True
             session['boss_id'] = boss_id
-
             return redirect(url_for("boss_dashboard"))
 
-        except sqlite3.IntegrityError:
-            flash("Username tayari ipo.", "danger")
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return str(e), 500
 
         finally:
             conn.close()
 
     return render_template("boss_signup.html")
-
 
 
 from datetime import datetime
