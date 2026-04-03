@@ -11,13 +11,61 @@ import string
 import re
 from functools import wraps
 import traceback
+import os
+from urllib.parse import urlparse
 
 def generate_staff_id():
     return "STF-" + str(uuid.uuid4())[:8]
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
-DB_PATH = "water_supply.db"
+
+# =======================
+# 2️⃣ Database Setup
+# =======================
+# Angalia environment variable ya DB_PATH (PostgreSQL URL) kwanza
+db_url = os.getenv("DB_PATH")
+
+if db_url:
+    # Hii itakuwa kwa Render (PostgreSQL)
+    print("Using PostgreSQL")
+    import psycopg2
+
+    def get_db_connection():
+        try:
+            conn = psycopg2.connect(db_url)
+            return conn
+        except Exception as e:
+            print("PostgreSQL connection error:", e)
+            return None
+else:
+    # Default SQLite local
+    print("Using SQLite")
+    DB_PATH = "water_supply.db"
+
+    def get_db_connection():
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.row_factory = sqlite3.Row
+            return conn
+        except Exception as e:
+            print("SQLite connection error:", e)
+            return None
+
+print("Database setup complete (FULL VERSION - NO REDUCTION)")
+
+# =======================
+# 3️⃣ Decorators & Helpers
+# =======================
+def check_trial_expiry(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        boss_id = session.get("boss_id")
+        if not boss_id:
+            return redirect(url_for("boss_login"))
+        return f(*args, **kwargs)
+    return decorated_function
+
 
 
 def check_trial_expiry(f):
