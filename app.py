@@ -894,28 +894,30 @@ from datetime import datetime, timedelta
 
 
 
-
 @app.route("/boss/signup", methods=["GET", "POST"])
 def boss_signup():
     if request.method == "POST":
+        full_name = request.form.get("full_name")
+        username = request.form.get("username")
+        password = request.form.get("password")
+        phone = request.form.get("phone")
+        email = request.form.get("email")
+
+        boss_id = "BOSS-" + str(uuid.uuid4())[:8]
+        hashed_pw = generate_password_hash(password)
+        now = datetime.now()
+        signup_date = now.strftime("%Y-%m-%d %H:%M:%S")
+        trial_end_date = (now + timedelta(minutes=2)).strftime("%Y-%m-%d %H:%M:%S")
+        status = "TRIAL"
+
+        conn = None  # 🔹 Initialize connection variable
         try:
-            full_name = request.form.get("full_name")
-            username = request.form.get("username")
-            password = request.form.get("password")
-            phone = request.form.get("phone")
-            email = request.form.get("email")
-
-            boss_id = "BOSS-" + str(uuid.uuid4())[:8]
-            hashed_pw = generate_password_hash(password)
-            now = datetime.now()
-            signup_date = now.strftime("%Y-%m-%d %H:%M:%S")
-            trial_end_date = (now + timedelta(minutes=2)).strftime("%Y-%m-%d %H:%M:%S")
-            status = "TRIAL"
-
             conn = get_db_connection()
             cur = conn.cursor()
 
-            cur.execute("SELECT * FROM boss WHERE email = ? OR phone = ?", (email, phone))
+            cur.execute("SELECT * FROM boss WHERE email = %s OR phone = %s" if DB_URL else "SELECT * FROM boss WHERE email = ? OR phone = ?", 
+                        (email, phone))
+
             existing = cur.fetchone()
             if existing:
                 flash("Email au namba ya simu tayari imetumika.", "danger")
@@ -927,28 +929,35 @@ def boss_signup():
                     signup_date, trial_end_date, status, is_online, created_at,
                     phone, email
                 )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """ if DB_URL else """
+                INSERT INTO boss (
+                    boss_id, full_name, username, password,
+                    signup_date, trial_end_date, status, is_online, created_at,
+                    phone, email
+                )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                boss_id, full_name, username, hashed_pw,
-                signup_date, trial_end_date, status, 1, signup_date,
-                phone, email
-            ))
+                """,
+                (boss_id, full_name, username, hashed_pw,
+                 signup_date, trial_end_date, status, 1, signup_date,
+                 phone, email)
+            )
 
             conn.commit()
             session['just_signed_up'] = True
             session['boss_id'] = boss_id
+
             return redirect(url_for("boss_dashboard"))
 
         except Exception as e:
-            import traceback
-            traceback.print_exc()
-            return str(e), 500
+            print("❌ Boss signup error:", e)
+            flash("Tatizo limetokea. Jaribu tena.", "danger")
 
         finally:
-            conn.close()
+            if conn:  # 🔹 Close only if connection exists
+                conn.close()
 
     return render_template("boss_signup.html")
-
 
 from datetime import datetime
 @app.route("/boss/login", methods=["GET", "POST"])
