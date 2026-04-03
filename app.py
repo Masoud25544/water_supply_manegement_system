@@ -76,116 +76,160 @@ def check_trial_expiry(f):
 # ================================
 # DATABASE SETUP FUNCTION
 # ================================
+
+
+# =====================================================
+# 🔥 UNIVERSAL HELPERS
+# =====================================================
+def generate_id(prefix):
+    return f"{prefix}-{uuid.uuid4()}"
+
+def format_query(query, is_postgres):
+    if is_postgres:
+        query = query.replace("AUTOINCREMENT", "")
+    return query
+
+def execute_query(cur, query, params=(), is_postgres=False):
+    query = format_query(query, is_postgres)
+
+    if is_postgres:
+        query = query.replace("?", "%s")
+
+    # 🔥 FIX: params normalization
+    if params is None:
+        params = ()
+
+    if not isinstance(params, (list, tuple)):
+        params = (params,)
+
+    # 🔥 FIX KUBWA: kama hakuna placeholders usipeleke params
+    if ("?" not in query) and ("%s" not in query):
+        cur.execute(query)
+    else:
+        cur.execute(query, params)
+
+def safe_add_column(cur, table, column_def):
+    try:
+        cur.execute(f"ALTER TABLE {table} ADD COLUMN {column_def}")
+    except:
+        pass
+
+
+# =====================================================
+# INIT DB
+# =====================================================
+
 def init_db():
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cur = conn.cursor()
+        is_postgres = DB_PATH.startswith("postgresql://")
+
+        if is_postgres:
+            import psycopg2
+            conn = psycopg2.connect(DB_PATH, sslmode="require")
+            cur = conn.cursor()
+        else:
+            conn = sqlite3.connect(DB_PATH)
+            cur = conn.cursor()
 
         # =====================================================
         # SUPER ADMIN
         # =====================================================
-        cur.execute("""
+        execute_query(cur, """
         CREATE TABLE IF NOT EXISTS super_admin (
             admin_id TEXT PRIMARY KEY,
             username TEXT UNIQUE NOT NULL,
             password TEXT NOT NULL,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-        """)
-        default_admin_id = "ADMIN-" + str(uuid.uuid4())
-        cur.execute("""
-        INSERT OR IGNORE INTO super_admin 
-        (admin_id, username, password, created_at)
-        VALUES (?, ?, ?, ?)
-        """, (
-            default_admin_id,
-            "admin",
-            generate_password_hash("1234"),
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        ))
+        """, is_postgres=is_postgres)
+
+        default_admin_id = generate_id("ADMIN")
+
+        if is_postgres:
+            cur.execute("""
+            INSERT INTO super_admin (admin_id, username, password, created_at)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (username) DO NOTHING
+            """, (
+                default_admin_id,
+                "admin",
+                generate_password_hash("1234"),
+                datetime.now()
+            ))
+        else:
+            execute_query(cur, """
+            INSERT OR IGNORE INTO super_admin (admin_id, username, password, created_at)
+            VALUES (?, ?, ?, ?)
+            """, (
+                default_admin_id,
+                "admin",
+                generate_password_hash("1234"),
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            ), is_postgres)
 
         # =====================================================
         # ANNOUNCEMENTS
         # =====================================================
-        cur.execute("""
+        execute_query(cur, """
         CREATE TABLE IF NOT EXISTS announcements (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL,
             message TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-        """)
-        # 🔹 Safe add created_by column (if it does not exist)
-        try:
-            cur.execute("ALTER TABLE announcements ADD COLUMN created_by TEXT;")
-        except sqlite3.OperationalError:
-            pass  # column already exists
+        """, is_postgres)
+
+        safe_add_column(cur, "announcements", "created_by TEXT")
 
         # =====================================================
         # ANNOUNCEMENT READS
         # =====================================================
-        cur.execute("""
+        execute_query(cur, """
         CREATE TABLE IF NOT EXISTS announcement_reads (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            announcement_id INTEGER NOT NULL,
+            announcement_id TEXT NOT NULL,
             boss_id TEXT NOT NULL,
             is_read INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-        """)
+        """, is_postgres)
 
-        # =====================================================
-        # UNIQUE INDEX
-        # =====================================================
-        cur.execute("""
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_announcement_read_unique
-        ON announcement_reads (announcement_id, boss_id)
-        """)
+        try:
+            execute_query(cur, """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_announcement_read_unique
+            ON announcement_reads (announcement_id, boss_id)
+            """, is_postgres)
+        except:
+            pass
 
         # =====================================================
         # BOSS
         # =====================================================
-        cur.execute("""
+        execute_query(cur, """
         CREATE TABLE IF NOT EXISTS boss (
             boss_id TEXT PRIMARY KEY,
             full_name TEXT NOT NULL,
             username TEXT UNIQUE NOT NULL,
             password TEXT NOT NULL,
-            signup_date TEXT NOT NULL,
-            trial_end_date TEXT NOT NULL,
+            signup_date TIMESTAMP NOT NULL,
+            trial_end_date TIMESTAMP NOT NULL,
             status TEXT NOT NULL DEFAULT 'ACTIVE',
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-        """)
+        """, is_postgres)
 
-        # 🔹 SAFE ADD subscription_end_date COLUMN (HAIVURUGI CHOCHOTE)
-        try:
-            cur.execute("ALTER TABLE boss ADD COLUMN subscription_end_date TEXT;")
-        except sqlite3.OperationalError:
-            pass  # column tayari ipo
-
-        # 🔹 SAFE ADD is_online COLUMN (HAIVURUGI CHOCHOTE)
-        try:
-            cur.execute("ALTER TABLE boss ADD COLUMN is_online INTEGER DEFAULT 0;")
-        except sqlite3.OperationalError:
-            pass  # column tayari ipo
-
-        # 🆕 🔹 SAFE ADD phone COLUMN (MPYA)
-        try:
-            cur.execute("ALTER TABLE boss ADD COLUMN phone TEXT;")
-        except sqlite3.OperationalError:
-            pass  # column tayari ipo
-
-        # 🆕 🔹 SAFE ADD email COLUMN (MPYA)
-        try:
-            cur.execute("ALTER TABLE boss ADD COLUMN email TEXT;")
-        except sqlite3.OperationalError:
-            pass  # column tayari ipo
+        for col in [
+            "subscription_end_date TEXT",
+            "is_online INTEGER DEFAULT 0",
+            "phone TEXT",
+            "email TEXT"
+        ]:
+            safe_add_column(cur, "boss", col)
 
         # =====================================================
         # STAFF
         # =====================================================
-        cur.execute("""
+        execute_query(cur, """
         CREATE TABLE IF NOT EXISTS staff (
             staff_id TEXT PRIMARY KEY,
             boss_id TEXT NOT NULL,
@@ -194,16 +238,16 @@ def init_db():
             password TEXT NOT NULL,
             role TEXT,
             status TEXT NOT NULL DEFAULT 'ACTIVE',
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             permissions TEXT,
             FOREIGN KEY (boss_id) REFERENCES boss(boss_id) ON DELETE CASCADE
         )
-        """)
+        """, is_postgres=is_postgres)
 
         # =====================================================
         # CUSTOMERS
         # =====================================================
-        cur.execute("""
+        execute_query(cur, """
         CREATE TABLE IF NOT EXISTS customers (
             customer_id TEXT PRIMARY KEY,
             boss_id TEXT NOT NULL,
@@ -212,87 +256,87 @@ def init_db():
             area TEXT,
             house_number TEXT,
             meter_number TEXT,
-            signup_date TEXT,
+            signup_date TIMESTAMP,
             status TEXT DEFAULT 'ACTIVE',
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (boss_id) REFERENCES boss(boss_id) ON DELETE CASCADE
         )
-        """)
+        """, is_postgres=is_postgres)
 
         # =====================================================
         # METERS
         # =====================================================
-        cur.execute("""
+        execute_query(cur, """
         CREATE TABLE IF NOT EXISTS meters (
             meter_id TEXT PRIMARY KEY,
             meter_number TEXT UNIQUE NOT NULL,
             customer_id TEXT NOT NULL,
             status TEXT DEFAULT 'ACTIVE',
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (customer_id) REFERENCES customers(customer_id) ON DELETE CASCADE
         )
-        """)
+        """, is_postgres=is_postgres)
 
         # =====================================================
         # TARIFFS
         # =====================================================
-        cur.execute("""
+        execute_query(cur, """
         CREATE TABLE IF NOT EXISTS tariffs (
             tariff_id TEXT PRIMARY KEY,
             boss_id TEXT NOT NULL,
             price_per_unit REAL NOT NULL,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (boss_id) REFERENCES boss(boss_id) ON DELETE CASCADE
         )
-        """)
+        """, is_postgres=is_postgres)
 
         # =====================================================
         # MASTER METER
         # =====================================================
-        cur.execute("""
+        execute_query(cur, """
         CREATE TABLE IF NOT EXISTS master_meter (
             master_id TEXT PRIMARY KEY,
             boss_id TEXT NOT NULL,
             master_number TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'ACTIVE',
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (boss_id) REFERENCES boss(boss_id) ON DELETE CASCADE
         )
-        """)
+        """, is_postgres=is_postgres)
 
         # =====================================================
         # MASTER METER READINGS
         # =====================================================
-        cur.execute("""
+        execute_query(cur, """
         CREATE TABLE IF NOT EXISTS master_meter_readings (
             reading_id TEXT PRIMARY KEY,
             master_id TEXT NOT NULL,
             reading_value REAL NOT NULL,
-            reading_date TEXT NOT NULL,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            reading_date TIMESTAMP NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (master_id) REFERENCES master_meter(master_id) ON DELETE CASCADE
         )
-        """)
+        """, is_postgres=is_postgres)
 
         # =====================================================
         # METER READINGS
         # =====================================================
-        cur.execute("""
+        execute_query(cur, """
         CREATE TABLE IF NOT EXISTS meter_readings (
             reading_id TEXT PRIMARY KEY,
             meter_id TEXT NOT NULL,
             reading_value REAL NOT NULL,
-            reading_date TEXT NOT NULL,
+            reading_date TIMESTAMP NOT NULL,
             recorded_by TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (meter_id) REFERENCES meters(meter_id) ON DELETE CASCADE
         )
-        """)
+        """, is_postgres=is_postgres)
 
         # =====================================================
         # BILLS
         # =====================================================
-        cur.execute("""
+        execute_query(cur, """
         CREATE TABLE IF NOT EXISTS bills (
             bill_id TEXT PRIMARY KEY,
             customer_id TEXT NOT NULL,
@@ -304,17 +348,17 @@ def init_db():
             billing_month TEXT,
             status TEXT DEFAULT 'UNPAID',
             payment_method TEXT,
-            payment_date TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            payment_date TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (customer_id) REFERENCES customers(customer_id) ON DELETE CASCADE,
             FOREIGN KEY (meter_id) REFERENCES meters(meter_id) ON DELETE CASCADE
         )
-        """)
+        """, is_postgres=is_postgres)
 
         # =====================================================
         # PAYMENTS
         # =====================================================
-        cur.execute("""
+        execute_query(cur, """
         CREATE TABLE IF NOT EXISTS payments (
             payment_id TEXT PRIMARY KEY,
             bill_id TEXT NOT NULL,
@@ -323,18 +367,18 @@ def init_db():
             amount_paid REAL NOT NULL,
             payment_method TEXT,
             reference TEXT,
-            paid_at TEXT NOT NULL,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            paid_at TIMESTAMP NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (bill_id) REFERENCES bills(bill_id) ON DELETE CASCADE,
             FOREIGN KEY (customer_id) REFERENCES customers(customer_id) ON DELETE CASCADE,
             FOREIGN KEY (boss_id) REFERENCES boss(boss_id) ON DELETE CASCADE
         )
-        """)
+        """, is_postgres=is_postgres)
 
         # =====================================================
         # RECEIPTS
         # =====================================================
-        cur.execute("""
+        execute_query(cur, """
         CREATE TABLE IF NOT EXISTS receipts (
             receipt_id TEXT PRIMARY KEY,
             payment_id TEXT NOT NULL,
@@ -342,19 +386,19 @@ def init_db():
             customer_id TEXT NOT NULL,
             boss_id TEXT NOT NULL,
             amount REAL,
-            issued_at TEXT NOT NULL,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            issued_at TIMESTAMP NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             notes TEXT,
             FOREIGN KEY (payment_id) REFERENCES payments(payment_id) ON DELETE CASCADE,
             FOREIGN KEY (customer_id) REFERENCES customers(customer_id) ON DELETE CASCADE,
             FOREIGN KEY (boss_id) REFERENCES boss(boss_id) ON DELETE CASCADE
         )
-        """)
+        """, is_postgres=is_postgres)
 
         # =====================================================
         # ACTIVITY LOGS
         # =====================================================
-        cur.execute("""
+        execute_query(cur, """
         CREATE TABLE IF NOT EXISTS activity_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_name TEXT,
@@ -364,20 +408,21 @@ def init_db():
             time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             boss_id TEXT
         )
-        """)
+        """, is_postgres=is_postgres)
 
         # =====================================================
         # ANDROID METADATA
         # =====================================================
-        cur.execute("""
+        execute_query(cur, """
         CREATE TABLE IF NOT EXISTS android_metadata (
             locale TEXT
         )
-        """)
+        """, is_postgres=is_postgres)
 
         conn.commit()
         conn.close()
-        print("✅ Database setup complete.")
+
+        print("✅ Database setup complete (FULL VERSION - NO REDUCTION)")
 
     except Exception as e:
         print("❌ Error setting up database:", str(e))
@@ -388,11 +433,9 @@ def init_db():
         except:
             pass
 
-# Run DB initialization when app starts
+
+# 🚀 RUN
 init_db()
-
-
-
 
 # ================================
 # INIT DATABASE ROUTE (kwa testing)
