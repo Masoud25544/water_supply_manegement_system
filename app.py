@@ -11,6 +11,11 @@ import string
 import re
 from functools import wraps
 import traceback
+import hashlib
+
+def hash_password(password):
+    # SHA256 hashing
+    return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
 def generate_staff_id():
     return "STF-" + str(uuid.uuid4())[:8]
@@ -20,52 +25,91 @@ app.secret_key = "supersecretkey"
 DB_PATH = "water_supply.db"
 
 
-def check_trial_expiry(f):
+# =======================
+# DB CONNECTION
+# =======================
+def get_db_connection():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+# =======================
+# ✅ SINGLE ACCESS CONTROL (NEW)
+# =======================
+from functools import wraps
+from flask import session, redirect, url_for, flash
+from datetime import datetime
+
+def check_access(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         boss_id = session.get("boss_id")
         if not boss_id:
+            flash("Tafadhali ingia kwanza", "danger")
             return redirect(url_for("boss_login"))
 
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("SELECT status, trial_end_date, subscription_end_date FROM boss WHERE boss_id = ?", (boss_id,))
+        cur.execute("""
+            SELECT status, trial_end_date, subscription_end_date 
+            FROM boss 
+            WHERE boss_id = ?
+        """, (boss_id,))
         boss = cur.fetchone()
         conn.close()
 
+        if not boss:
+            flash("Session imeisha, ingia tena", "danger")
+            return redirect(url_for("boss_login"))
+
+        status = boss["status"]
         now = datetime.now()
 
-        # 🔹 TRIAL check
-        if boss and boss["status"] == "TRIAL" and boss["trial_end_date"]:
+        # =========================
+        # 🔹 UPDATE TRIAL
+        # =========================
+        if status == "TRIAL" and boss["trial_end_date"]:
             try:
                 trial_end = datetime.strptime(boss["trial_end_date"], "%Y-%m-%d %H:%M:%S")
+                if now > trial_end:
+                    status = "TRIAL_EXPIRE"
+                    conn = get_db_connection()
+                    cur = conn.cursor()
+                    cur.execute("UPDATE boss SET status=? WHERE boss_id=?", (status, boss_id))
+                    conn.commit()
+                    conn.close()
+                    if not session.get("trial_expired_shown"):
+                        flash("Boss, trial imeisha. Wasiliana na admin ili kuendelea.", "warning")
+                        session["trial_expired_shown"] = True
             except:
-                trial_end = now
-            if now > trial_end:
-                conn = get_db_connection()
-                cur = conn.cursor()
-                cur.execute("UPDATE boss SET status='INACTIVE', is_online=0 WHERE boss_id=?", (boss_id,))
-                conn.commit()
-                conn.close()
-                session.clear()
-                flash("Trial yako imeisha. Tafadhali wasiliana na admin.", "danger")
-                return redirect(url_for("boss_login"))
+                pass
 
-        # 🔹 SUBSCRIPTION check
-        if boss and boss["status"] == "ACTIVE" and boss["subscription_end_date"]:
+        # =========================
+        # 🔹 UPDATE SUBSCRIPTION
+        # =========================
+        if status == "ACTIVE" and boss["subscription_end_date"]:
             try:
                 sub_end = datetime.strptime(boss["subscription_end_date"], "%Y-%m-%d %H:%M:%S")
+                if now > sub_end:
+                    status = "SUBSCRIPTION_EXPIRE"
+                    conn = get_db_connection()
+                    cur = conn.cursor()
+                    cur.execute("UPDATE boss SET status=? WHERE boss_id=?", (status, boss_id))
+                    conn.commit()
+                    conn.close()
+                    if not session.get("subscription_expired_shown"):
+                        flash("Subscription imeisha. Tafadhali lipa ili kuendelea.", "warning")
+                        session["subscription_expired_shown"] = True
             except:
-                sub_end = now
-            if now > sub_end:
-                conn = get_db_connection()
-                cur = conn.cursor()
-                cur.execute("UPDATE boss SET status='INACTIVE', is_online=0 WHERE boss_id=?", (boss_id,))
-                conn.commit()
-                conn.close()
-                session.clear()
-                flash("Subscription yako imeisha. Tafadhali lipa ili kuendelea.", "danger")
-                return redirect(url_for("boss_login"))
+                pass
+
+        # =========================
+        # HARD BLOCK kwa vitendo vyote
+        # =========================
+        if status in ["TRIAL_EXPIRE", "SUBSCRIPTION_EXPIRE", "INACTIVE"]:
+            flash("⚠️ Huwezi kufanya vitendo hivi kwa sasa. Tafadhali lipia au wasiliana na support.", "warning")
+            return redirect(url_for("boss_dashboard"))
 
         return f(*args, **kwargs)
     return decorated_function
@@ -199,6 +243,12 @@ def init_db():
             FOREIGN KEY (boss_id) REFERENCES boss(boss_id) ON DELETE CASCADE
         )
         """)
+
+        # 🔹 SAFE ADD reset_required COLUMN (HAIVURUGI CHOCHOTE)
+        try:
+            cur.execute("ALTER TABLE staff ADD COLUMN reset_required INTEGER DEFAULT 0;")
+        except sqlite3.OperationalError:
+            pass  # column tayari ipo
 
         # =====================================================
         # CUSTOMERS
@@ -390,7 +440,6 @@ def init_db():
 
 # Run DB initialization when app starts
 init_db()
-
 
 
 
@@ -769,9 +818,6 @@ def new_bosses():
     
 
 
-    
-
-
 @app.route("/superadmin/boss/<boss_id>/trigger_reset", methods=["POST"])
 def superadmin_trigger_boss_reset(boss_id):
     if "superadmin_id" not in session:
@@ -783,15 +829,29 @@ def superadmin_trigger_boss_reset(boss_id):
 
     conn = get_db_connection()
     cur = conn.cursor()
+
+    # 🔹 Hifadhi status ya sasa kabla ya kubadilisha password
+    cur.execute("SELECT status FROM boss WHERE boss_id=?", (boss_id,))
+    boss = cur.fetchone()
+    if not boss:
+        conn.close()
+        flash("Boss haipo", "danger")
+        return redirect(url_for("superadmin_dashboard"))
+
+    current_status = boss["status"]
+
+    # 🔹 Badilisha password tu, status ibaki ile ile
     cur.execute(
-        "UPDATE boss SET password=?, status='RESET_PENDING' WHERE boss_id=?",
-        (hashed, boss_id)
+        "UPDATE boss SET password=?, status=? WHERE boss_id=?",
+        (hashed, current_status, boss_id)
     )
     conn.commit()
     conn.close()
 
     flash(f"Boss ameombwa kuweka PIN mpya. Temporary password ni: {temp_password}", "info")
-    return redirect(url_for("superadmin_dashboard"))
+    return redirect(url_for("superadmin_dashboard"))    
+
+
 
 
 
@@ -815,7 +875,7 @@ def toggle_boss(boss_id):
         cur.execute("UPDATE boss SET status='INACTIVE', subscription_end_date=NULL WHERE boss_id=?", (boss_id,))
     else:
         # Enable boss and set subscription_end_date
-        subscription_end = now + timedelta(minutes=15)  # testing duration
+        subscription_end = now + timedelta(minutes=2)  # testing duration
         cur.execute("""
             UPDATE boss
             SET status='ACTIVE', subscription_end_date=?
@@ -835,30 +895,20 @@ def superadmin_logout():
     return redirect(url_for("superadmin_login"))    
     
                 
-                            
 # =============================
 # AUTO-APPLY DECORATOR KWA ROUTES ZA BOSS
 # =============================
-from flask import Flask
 from functools import wraps
 
-# Hii function itachunguza kama route ni ya boss na kui-wrap na decorator
-def apply_trial_decorator(app, decorator):
+# Hii function ita-apply decorator kwa routes zote zinazoanza na "boss_"
+def apply_access_decorator(app, decorator):
     for rule in app.url_map.iter_rules():
-        if rule.endpoint.startswith("boss_"):  # Routes zote za boss zinapaswa kuanza na "boss_"
+        if rule.endpoint.startswith("boss_"):
             view_func = app.view_functions[rule.endpoint]
             app.view_functions[rule.endpoint] = decorator(view_func)
 
-# Baada ya ku-define routes zote za boss, run:
-apply_trial_decorator(app, check_trial_expiry)                                        
-                                                    
-                                                                            
-                    
-                            
-
-from datetime import datetime, timedelta
-
-
+# ⚠️ Hakikisha hii inaitwa BAADA ya routes zote ku-define
+apply_access_decorator(app, check_access)
 
 
 @app.route("/boss/signup", methods=["GET", "POST"])
@@ -879,7 +929,7 @@ def boss_signup():
 
         signup_date = now.strftime("%Y-%m-%d %H:%M:%S")
         # ✅ Trial ya dakika 2 kwa testing
-        trial_end_date = (now + timedelta(minutes=2)).strftime("%Y-%m-%d %H:%M:%S")
+        trial_end_date = (now + timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M:%S")
 
         # ✅ Status ya TRIAL
         status = "TRIAL"
@@ -925,20 +975,18 @@ def boss_signup():
     return render_template("boss_signup.html")
 
 
-
-from datetime import datetime
 @app.route("/boss/login", methods=["GET", "POST"])
 def boss_login():
     """
     🔹 Boss Login Route
     Hii route inashughulikia:
     1️⃣ Login ya boss wa system
-    2️⃣ Auto-check na update ya TRIAL na subscription expiry
-    3️⃣ Block account ikiwa imefungwa
+    2️⃣ Auto-check na update ya TRIAL na subscription expiry (soft restriction)
+    3️⃣ Block account ikiwa imefungwa manually (INACTIVE)
     4️⃣ Handle RESET_PENDING temporary passwords
     5️⃣ Initialize session na announcements
     6️⃣ Update is_online status
-    7️⃣ Provide user-friendly and context-aware messages
+    7️⃣ Provide user-friendly messages
     """
     if request.method == "POST":
         username = request.form.get("username")
@@ -1006,43 +1054,39 @@ def boss_login():
             sub_end = None
 
         # ===============================
-        # 🔹 AUTO-EXPIRE TRIAL OR SUBSCRIPTION
+        # 🔹 SOFT RESTRICTION AFTER TRIAL OR SUBSCRIPTION EXPIRE
         # ===============================
-        if boss["status"] == "TRIAL" and trial_end and now > trial_end:
-            # 🔹 Boss imeisha TRIAL → weka INACTIVE na offline
-            cur.execute(
-                "UPDATE boss SET status=?, is_online=0 WHERE boss_id=?",
-                ("INACTIVE", boss["boss_id"])
-            )
-            conn.commit()
-            boss["status"] = "INACTIVE"
-            flash(
-                "Umejaribu mfumo wa demo na muda wa jaribio umeisha. Tafadhali tupatie maoni yako au wasiliana na support.",
-                "warning"
-            )
-            conn.close()
-            return redirect(url_for("boss_login"))
+        restricted = False  # temporary flag
 
-        if boss["status"] == "ACTIVE" and sub_end and now > sub_end:
-            # 🔹 Subscription imeisha → weka INACTIVE na offline
+        if boss["status"] == "TRIAL" and trial_end and now > trial_end:
+            restricted = True
+            boss["status"] = "TRIAL_EXPIRE"
             cur.execute(
-                "UPDATE boss SET status=?, is_online=0 WHERE boss_id=?",
-                ("INACTIVE", boss["boss_id"])
+                "UPDATE boss SET status=? WHERE boss_id=?",
+                ("TRIAL_EXPIRE", boss["boss_id"])
             )
             conn.commit()
-            boss["status"] = "INACTIVE"
             flash(
-                "Subscription yako imeisha. Tafadhali lipa kuendelea ili kuendelea kutumia mfumo.",
+                "⚠️ Trial imeisha: Huwezi kusoma meter au kupokea malipo. Unaweza kuendelea kuona dashboard.",
                 "warning"
             )
-            conn.close()
-            return redirect(url_for("boss_login"))
+        elif boss["status"] == "ACTIVE" and sub_end and now > sub_end:
+            restricted = True
+            boss["status"] = "SUBSCRIPTION_EXPIRE"
+            cur.execute(
+                "UPDATE boss SET status=? WHERE boss_id=?",
+                ("SUBSCRIPTION_EXPIRE", boss["boss_id"])
+            )
+            conn.commit()
+            flash(
+                "⚠️ Subscription yako imeisha: Huwezi kusoma meter au kupokea malipo. Tafadhali wasiliana na Masoud (0745906763) ili kufanya malipo.",
+                "warning"
+            )
 
         # ===============================
         # 🔹 BLOCK LOGIN IF MANUALLY INACTIVE
         # ===============================
         if boss["status"] == "INACTIVE":
-            # 🔹 FORCE OFFLINE
             cur.execute(
                 "UPDATE boss SET is_online=0 WHERE boss_id=?",
                 (boss["boss_id"],)
@@ -1062,18 +1106,16 @@ def boss_login():
         session["boss_id"] = boss["boss_id"]
         session["boss_status"] = boss["status"]
         session["boss_name"] = boss["full_name"]
+        session["restricted"] = restricted  # hii itabakia bila kufutwa
 
         # ===============================
-        # 🔹 UPDATE ONLINE STATUS KWA KILA STATUS
+        # 🔹 UPDATE ONLINE STATUS
         # ===============================
-        if boss["status"] in ["TRIAL", "ACTIVE"]:
-            # 🔹 TRIAL inayoendelea au ACTIVE → online
+        if boss["status"] in ["TRIAL", "ACTIVE", "TRIAL_EXPIRE", "SUBSCRIPTION_EXPIRE"]:
             cur.execute("UPDATE boss SET is_online=1 WHERE boss_id=?", (boss["boss_id"],))
-            conn.commit()
         else:
-            # 🔹 INACTIVE → offline
             cur.execute("UPDATE boss SET is_online=0 WHERE boss_id=?", (boss["boss_id"],))
-            conn.commit()
+        conn.commit()
 
         # ===============================
         # 🔹 FETCH LATEST ANNOUNCEMENT
@@ -1098,16 +1140,22 @@ def boss_login():
         # ===============================
         if boss["status"] == "TRIAL":
             flash(
-                "Karibu ! umeanza kutumia mfumo. Mara baada ya kutumia mfumo huu tafadhali tupatie maoni yako ili tuendelee kuboresha huduma zetu (ph.0744906763).",
+                "Karibu ! umeanza kutumia mfumo. Mara baada ya kutumia mfumo huu tafadhali tupatie maoni yako ili tuendelee kuboresha huduma zetu (ph.0745906763).",
                 "info"
             )
         elif boss["status"] == "ACTIVE":
             flash(f"Karibu tena, {boss['full_name']}! Tuna furaha kukuona hapa.", "success")
+        elif boss["status"] in ["TRIAL_EXPIRE", "SUBSCRIPTION_EXPIRE"]:
+            flash(
+                f"Karibu tena, {boss['full_name']}! Mfumo una restrictions kutokana na trial/subscription. Huwezi kusoma meter au kupokea malipo.",
+                "warning"
+            )
 
         return redirect(url_for("boss_dashboard"))
 
     return render_template("boss_login.html")
-    
+
+
     
     
 @app.route("/boss/announcements")
@@ -1215,36 +1263,30 @@ from flask import render_template, session, redirect, url_for, flash
 import sqlite3
 
 @app.route("/boss_dashboard")
-@check_trial_expiry   # 🔹 Hii inachunguza TRIAL expiry kabla ya ku-render dashboard
 def boss_dashboard():
     import sqlite3
     from datetime import datetime, date
 
-    # 🔐 Hakikisha boss ame-login
     if "boss_id" not in session:
         flash("Tafadhali ingia kwanza", "danger")
         return redirect(url_for("boss_login"))
 
     boss_id = session["boss_id"]
 
-    # 🔌 Fungua connection ya database
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
 
-    # 📌 Pata taarifa za boss
     boss = conn.execute("SELECT * FROM boss WHERE boss_id=?", (boss_id,)).fetchone()
     if not boss:
         conn.close()
         flash("Boss haipo kwenye systemu!", "danger")
         return redirect(url_for("boss_login"))
 
-    # 🔴 Kagua trial na subscription
     today = date.today()
     trial_end_date = boss['trial_end_date']
     subscription_end_date = boss['subscription_end_date']
 
     def parse_date(dt_str):
-        """Safely parse date/time string ya database"""
         if not dt_str:
             return None
         try:
@@ -1255,39 +1297,31 @@ def boss_dashboard():
     trial_end = parse_date(trial_end_date)
     subscription_end = parse_date(subscription_end_date)
 
-    # 🔹 BOSS bado kwenye trial
     on_trial = trial_end and trial_end >= today
-
-    # 🔹 Subscription expired? (kama trial imeisha na subscription haijalipwa)
     subscription_expired = not on_trial and (not subscription_end or subscription_end < today)
 
-    # 🔹 Set message kulingana na hali ya boss
     boss_message = ""
     if on_trial:
         boss_message = "Umepata muda wa trial, tafadhali jaribu mfumo na tupe maoni yako."
     elif subscription_expired:
         boss_message = "Muda wako wa kutumia mfumo umeisha. Tafadhali lipa ili kuendelea."
-        # Redirect kwa payment page automatically
         conn.close()
         flash(boss_message, "danger")
         return redirect(url_for("subscription_payment", boss_id=boss_id))
     else:
         boss_message = "Subscription yako ni active, unaendelea kutumia huduma."
 
-    # ✅ One-time welcome message
     show_welcome = False
     if session.get('just_signed_up'):
         show_welcome = True
         session.pop('just_signed_up', None)
 
-    # 📌 Pata customers wote wa boss
     customers_raw = conn.execute("""
         SELECT * FROM customers 
         WHERE boss_id=? 
         ORDER BY full_name
     """, (boss_id,)).fetchall()
 
-    # 📌 Pata meters zote za customers
     meters_raw = conn.execute("""
         SELECT * FROM meters 
         WHERE customer_id IN (
@@ -1295,7 +1329,6 @@ def boss_dashboard():
         )
     """, (boss_id,)).fetchall()
 
-    # 📌 Pata bili ambazo hazijalipwa
     unpaid_bills = conn.execute("""
         SELECT b.*, c.full_name AS customer_name, m.meter_number
         FROM bills b
@@ -1305,7 +1338,6 @@ def boss_dashboard():
         ORDER BY b.billing_month DESC
     """, (boss_id,)).fetchall()
 
-    # 💰 Hesabu jumla ya deni
     total_unpaid_amount = conn.execute("""
         SELECT SUM(b.amount) as total
         FROM bills b
@@ -1313,7 +1345,6 @@ def boss_dashboard():
         WHERE b.status='UNPAID' AND c.boss_id=?
     """, (boss_id,)).fetchone()['total'] or 0
 
-    # 💵 Hesabu jumla ya malipo yote
     total_payments = conn.execute("""
         SELECT SUM(p.amount_paid) as total
         FROM payments p
@@ -1321,7 +1352,14 @@ def boss_dashboard():
         WHERE c.boss_id=?
     """, (boss_id,)).fetchone()['total'] or 0
 
-    # 📌 Angalia meters ambazo hazijasomwa mwezi huu
+    # 🔹 Hapa tumebadilisha kutoka created_at kwenda paid_at
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    today_total = conn.execute("""
+        SELECT SUM(amount_paid) as total
+        FROM payments
+        WHERE boss_id=? AND DATE(paid_at)=?
+    """, (boss_id, today_str)).fetchone()['total'] or 0
+
     skipped_meters = conn.execute("""
         SELECT COUNT(DISTINCT m.meter_id) as total
         FROM meters m
@@ -1336,7 +1374,6 @@ def boss_dashboard():
         )
     """, (boss_id,)).fetchone()["total"] or 0
 
-    # 📌 Tengeneza map ya meters kwa customer
     meters_map = {}
     for m in meters_raw:
         meters_map.setdefault(m['customer_id'], []).append({
@@ -1344,7 +1381,6 @@ def boss_dashboard():
             'status': m['status']
         })
 
-    # 📌 Unganisha customers na meters zao + status halisi
     customers = []
     for c in customers_raw:
         c_dict = dict(c)
@@ -1352,7 +1388,6 @@ def boss_dashboard():
         c_dict['customer_status'] = c['status']
         customers.append(c_dict)
 
-    # 📊 Hesabu meters active/inactive
     active_meters = sum(
         1 for mlist in meters_map.values() for m in mlist if m['status'] == 'ACTIVE'
     )
@@ -1360,7 +1395,6 @@ def boss_dashboard():
         1 for mlist in meters_map.values() for m in mlist if m['status'] != 'ACTIVE'
     )
 
-    # 📌 Recent activity logs (limit 5)
     recent_logs = conn.execute("""
         SELECT * FROM activity_logs
         WHERE boss_id=?
@@ -1368,7 +1402,6 @@ def boss_dashboard():
         LIMIT 5
     """, (boss_id,)).fetchall()
 
-    # 📌 Tangazo jipya (one-time)
     announcements = conn.execute("""
         SELECT a.id, a.title, a.message, a.created_at,
                COALESCE(ar.is_read, 0) as is_read
@@ -1391,10 +1424,8 @@ def boss_dashboard():
             conn.commit()
             break
 
-    # 🔒 Funga connection
     conn.close()
 
-    # 🎨 Rudisha data kwenye template
     return render_template(
         "boss_dashboard.html",
         boss=boss,
@@ -1404,12 +1435,44 @@ def boss_dashboard():
         unpaid_bills=unpaid_bills,
         total_unpaid_amount=total_unpaid_amount,
         total_payments=total_payments,
+        today_total=today_total,  # ✅ Hapa kadi ya Makusanyo ya Leo inafanya kazi
         skipped_meters=skipped_meters,
         recent_logs=recent_logs,
         show_welcome=show_welcome,
         announcement=show_announcement,
-        boss_message=boss_message  # ✅ Hii ndio message mpya kulingana na trial/subscription
+        boss_message=boss_message
     )
+
+
+
+from werkzeug.security import generate_password_hash
+
+@app.route("/boss/settings", methods=["GET", "POST"])
+def boss_settings():
+    if "boss_id" not in session:
+        return redirect(url_for("boss_login"))
+
+    if request.method == "POST":
+        new_password = request.form.get("new_password")
+        if new_password:
+            new_password = new_password.strip()  # Ondoa spaces zisizo lazima
+
+            # Hash password compatible na check_password_hash
+            hashed = generate_password_hash(new_password)
+
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute("""
+                UPDATE boss 
+                SET password = ? 
+                WHERE boss_id = ?
+            """, (hashed, session["boss_id"]))
+            conn.commit()
+            conn.close()
+
+            flash("Password updated successfully!", "success")
+
+    return render_template("boss_settings.html")
 
 
 @app.route("/boss/activity_logs")
@@ -1801,7 +1864,10 @@ def delete_customer(customer_id):
     
 # ================= READ METER =====================
 
+
+
 @app.route("/read_meter", methods=["GET", "POST"])
+@check_access
 def read_meter():
 
     # Hakikisha staff au boss ameloga
@@ -1821,15 +1887,6 @@ def read_meter():
 
     conn = get_db_connection()
     cur = conn.cursor()
-
-    # 🔹 Angalia status ya boss
-    cur.execute("SELECT status FROM boss WHERE boss_id=?", (boss_id,))
-    boss_row = cur.fetchone()
-
-    if not boss_row or boss_row["status"] != "ACTIVE":
-        flash("⚠️ Boss huyu ni INACTIVE, hauwezi kusoma meters", "warning")
-        conn.close()
-        return render_template("read_meter.html", bill=None)
 
     bill = None
 
@@ -1944,7 +2001,6 @@ def read_meter():
             return render_template("read_meter.html", bill=None)
 
         price_per_unit = tariff["price_per_unit"]
-
         amount = units_used * price_per_unit
         bill_id = "BILL-" + str(uuid.uuid4())[:8]
 
@@ -2089,7 +2145,7 @@ def boss_tariff():
 
         # ⚠️ Validation: Hakikisha value ipo
         if not price_per_unit:
-            flash("Tafadhali weka price per unit", "danger")
+            flash("Tafadhali weka bei ya unit", "danger")
             return redirect(url_for("boss_tariff"))
 
         try:
@@ -2112,11 +2168,11 @@ def boss_tariff():
             conn.commit()
 
             # 📢 Feedback ya mafanikio
-            flash(f"Tariff imeundwa: {price_per_unit} Tsh/unit", "success")
+            flash(f"Bei imehifadhiwa: {price_per_unit} Tsh/unit", "success")
 
         except ValueError:
             # ❌ Error: input sio namba sahihi
-            flash("Price per unit lazima iwe namba sahihi", "danger")
+            flash("Bei ya unit lazima iwe namba sahihi", "danger")
 
         except sqlite3.Error as e:
             # ❌ Error ya database
@@ -2538,7 +2594,7 @@ def receive_payment(bill_id):
 
     if boss_status["status"] != "ACTIVE":
         conn.close()
-        flash("Hauwezi kufanya malipo: Akaunti ya boss imezuiliwa", "danger")
+        flash("Tafadhari huwezi kurekodi malipo ya bill kwasasa : wasiiliana na masoud (0744906763)", "danger")
         return redirect(url_for(dashboard_route))
 
     # 3️⃣ Pata bill info
@@ -2797,6 +2853,64 @@ def view_staff():
     )
 
 
+
+# ==================== RESET STAFF PASSWORD ====================
+@app.route("/boss/reset_staff_password/<staff_id>", methods=["POST"])
+def boss_reset_staff_password(staff_id):
+    if "boss_id" not in session:
+        flash("Tafadhali ingia kwanza", "danger")
+        return redirect(url_for("boss_login"))
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Hakikisha staff ni chini ya boss huyu
+    cur.execute("SELECT * FROM staff WHERE staff_id=? AND boss_id=?", (staff_id, session["boss_id"]))
+    staff = cur.fetchone()
+    if not staff:
+        conn.close()
+        flash("Staff haipo au haiko chini yako.", "danger")
+        return redirect(url_for("view_staff"))
+
+    # Static temporary password
+    temp_password = "reset123"
+    from werkzeug.security import generate_password_hash
+    hashed_password = generate_password_hash(temp_password)
+
+    # Update password + set reset_required flag
+    cur.execute("UPDATE staff SET password=?, reset_required=1 WHERE staff_id=?", (hashed_password, staff_id))
+    conn.commit()
+    conn.close()
+
+    flash(f"Password ya {staff['full_name']} ime-reset. Temporary password: {temp_password}", "success")
+    return redirect(url_for("view_staff"))
+
+
+
+@app.route("/staff/set_new_password", methods=["GET", "POST"])
+def staff_set_new_password():
+    if "staff_id" not in session:
+        return redirect(url_for("staff_login"))
+
+    if request.method == "POST":
+        new_password = request.form.get("new_password")
+        if new_password:
+            from werkzeug.security import generate_password_hash
+            hashed = generate_password_hash(new_password)
+
+            conn = get_db_connection()
+            cur = conn.cursor()
+            # Update password na reset_required=0
+            cur.execute("UPDATE staff SET password=?, reset_required=0 WHERE staff_id=?", (hashed, session["staff_id"]))
+            conn.commit()
+            conn.close()
+
+            flash("Password imebadilishwa kwa mafanikio! Sasa unaweza kuingia kwenye dashboard.", "success")
+            return redirect(url_for("staff_dashboard"))
+
+    return render_template("staff_set_new_password.html")
+
+
     
 @app.route("/boss/toggle_staff/<staff_id>")
 def toggle_staff(staff_id):
@@ -2836,7 +2950,7 @@ def staff_login():
         password = request.form.get("password")
 
         conn = get_db_connection()
-        conn.row_factory = Row  # Make sure we can access by column name
+        conn.row_factory = Row  # access by column name
 
         staff = conn.execute("SELECT * FROM staff WHERE username=?", (username,)).fetchone()
 
@@ -2862,6 +2976,12 @@ def staff_login():
             session["staff_name"] = staff["full_name"]
             session["staff_role"] = staff["role"].lower()
             session["staff_boss_id"] = staff["boss_id"]
+
+            # 🔹 Force password change if reset_required
+            if staff["reset_required"] == 1:
+                flash("Password ime-reset na boss. Tafadhali weka password mpya ili kuendelea.", "warning")
+                conn.close()
+                return redirect(url_for("staff_set_new_password"))
 
             flash(f"Karibu {staff['full_name']}!", "success")
             conn.close()
