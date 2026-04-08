@@ -17,125 +17,110 @@ html, body {
     margin: 0;
     padding: 0;
     font-family: 'Inter', sans-serif;
-    background: #f4f6f9; /* light, clean background */
+    background: #e0e7ff; /* soft blue-gray */
+    color: #1e293b;
 }
 
-body {
-    display: flex;
-    flex-direction: column;
-}
+body { display: flex; flex-direction: column; }
 
-.container-full {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    padding: 24px;
-}
+.container-full { flex: 1; display: flex; flex-direction: column; padding: 24px; }
 
 /* --- Card --- */
 .card {
     border-radius: 14px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.06);
+    box-shadow: 0 8px 20px rgba(0,0,0,0.1);
     flex: 1;
     display: flex;
     flex-direction: column;
     padding: 25px;
-    background: #ffffff;
-    border: 1px solid #e5e7eb;
+    background: #f8fafc;
+    border: 1px solid #cbd5e1;
 }
 
 /* --- Heading --- */
 h1 {
     font-weight: 600;
-    color: #1e293b; /* dark slate */
+    color: #1e293b;
     margin-bottom: 20px;
     text-align: center;
 }
 
 /* --- Flash Messages --- */
-.flash {
-    padding:12px;
-    margin-bottom:15px;
-    border-radius:8px;
-    font-size:14px;
-    border: 1px solid transparent;
-}
-
-.success { 
-    background-color:#ecfdf5; 
-    color:#065f46; 
-    border-color:#a7f3d0;
-}
-.danger { 
-    background-color:#fef2f2; 
-    color:#7f1d1d; 
-    border-color:#fecaca;
-}
-.warning { 
-    background-color:#fffbeb; 
-    color:#78350f; 
-    border-color:#fde68a;
-}
+.flash { padding:12px; margin-bottom:15px; border-radius:8px; font-size:14px; border:1px solid transparent; }
+.success { background-color:#ecfdf5; color:#065f46; border-color:#a7f3d0;}
+.danger { background-color:#fee2e2; color:#991b1b; border-color:#fecaca;}
+.warning { background-color:#fff7ed; color:#92400e; border-color:#fde68a;}
 
 /* --- Table --- */
-.table-responsive {
-    flex: 1;
-    overflow-y: auto;
-}
+.table-responsive { flex: 1; overflow-y: auto; }
+.table { border-radius: 10px; overflow: hidden; background: #f1f5f9; }
+.table th { background: #1e293b; color: #ffffff; font-weight: 500; font-size: 14px; }
+.table td { vertical-align: middle; font-size: 14px; }
+.table-striped tbody tr:nth-of-type(odd) { background-color: #e2e8f0; }
+.table-hover tbody tr:hover { background-color: #cbd5e1; }
 
-.table {
-    border-radius: 10px;
-    overflow: hidden;
-}
+/* --- Buttons General --- */
+.btn { min-width: 140px; transition: all 0.25s ease; border-radius: 8px; font-weight: 500; }
 
-.table th {
-    background: #1e293b; /* dark professional */
-    color: #ffffff;
-    font-weight: 500;
-    font-size: 14px;
-}
-
-.table td {
-    vertical-align: middle;
-    font-size: 14px;
-}
-
-.table-hover tbody tr:hover {
-    background-color: #f1f5f9;
-}
-
-/* --- Buttons --- */
-.btn {
-    min-width: 140px;
-    transition: all 0.2s ease;
-    border-radius: 8px;
-    font-weight: 500;
-}
-
-/* Primary action */
-.btn-success {
-    background-color: #2563eb;
-    border: none;
-}
-.btn-success:hover {
-    background-color: #1d4ed8;
-}
-
-/* Secondary */
-.btn-outline-secondary {
-    border-color: #cbd5f5;
-    color: #334155;
-}
-.btn-outline-secondary:hover {
-    background-color: #334155;
+/* --- Rudi Dashboard 3D Red --- */
+.dashboard-btn-red {
+    background: linear-gradient(145deg, #dc2626, #b91c1c);
     color: white;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 14px;
+    text-decoration: none;
+    box-shadow: 0 5px 8px rgba(0,0,0,0.3);
 }
+.dashboard-btn-red i { font-size: 18px; }
+.dashboard-btn-red:hover { transform: translateY(-3px) scale(1.05); box-shadow:0 8px 16px rgba(0,0,0,0.4);}
+.dashboard-btn-red:active { transform: translateY(1px) scale(0.98); box-shadow:0 4px 8px rgba(0,0,0,0.25); }
+
+/* --- Pokea Malipo 3D Blue --- */
+.btn-success {
+    background: linear-gradient(145deg, #2563eb, #1d4ed8);
+    color: white;
+    border: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 12px;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 13px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.25);
+}
+.btn-success i { font-size: 16px; }
+.btn-success:hover { transform: translateY(-2px) scale(1.05); box-shadow:0 6px 12px rgba(0,0,0,0.35);}
+.btn-success:active { transform: translateY(1px) scale(0.98); box-shadow:0 3px 6px rgba(0,0,0,0.2); }
+
+/* --- Mpigie Mteja 3D Green --- */
+.call-btn {
+    background: linear-gradient(145deg, #16A34A, #15803D);
+    color: white;
+    border: none;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.25);
+    font-weight: 600;
+    border-radius: 10px;
+    transition: all 0.2s ease-in-out;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 10px;
+    font-size: 13px;
+}
+.call-btn i { font-size: 16px; }
+.call-btn:hover { transform: translateY(-2px) scale(1.05); box-shadow:0 6px 12px rgba(0,0,0,0.35);}
+.call-btn:active { transform: translateY(1px) scale(0.98); box-shadow:0 3px 6px rgba(0,0,0,0.2);}
 </style>
 </head>
 <body>
 
 <div class="container-full">
-
     <div class="card">
         <h1>Bili Zisizolipwa</h1>
 
@@ -152,18 +137,18 @@ h1 {
         {% endwith %}
 
         <!-- Back to dashboard -->
-        <div class="mb-3 d-flex justify-content-start">
+        <div class="mb-3 d-flex justify-content-start gap-2">
             {% if user_role == "boss" %}
-                <a href="{{ url_for('boss_dashboard') }}" class="btn btn-outline-secondary">
-                    <i class="bi bi-arrow-left"></i> Rudi Dashboard
+                <a href="{{ url_for('boss_dashboard') }}" class="dashboard-btn-red">
+                    <i class="bi bi-speedometer2"></i> Rudi Dashboard
                 </a>
             {% elif user_role == "staff" %}
-                <a href="{{ url_for('staff_dashboard') }}" class="btn btn-outline-secondary">
-                    <i class="bi bi-arrow-left"></i> Rudi Dashboard
+                <a href="{{ url_for('staff_dashboard') }}" class="dashboard-btn-red">
+                    <i class="bi bi-speedometer2"></i> Rudi Dashboard
                 </a>
             {% elif user_role == "superadmin" %}
-                <a href="{{ url_for('superadmin_dashboard') }}" class="btn btn-outline-secondary">
-                    <i class="bi bi-arrow-left"></i> Rudi Dashboard
+                <a href="{{ url_for('superadmin_dashboard') }}" class="dashboard-btn-red">
+                    <i class="bi bi-speedometer2"></i> Rudi Dashboard
                 </a>
             {% endif %}
         </div>
@@ -175,6 +160,7 @@ h1 {
                     <tr>
                         <th>#</th>
                         <th>Customer Name</th>
+                        <th>Phone Number</th>
                         <th>Bill ID</th>
                         <th>Meter Number</th>
                         <th>Units Used</th>
@@ -188,21 +174,27 @@ h1 {
                     <tr>
                         <td>{{ loop.index }}</td>
                         <td class="text-start">{{ bill.customer_name }}</td>
+                        <td>{{ bill.customer_phone or "Hakuna" }}</td>
                         <td>{{ bill.bill_id }}</td>
                         <td>{{ bill.meter_number or "Hakuna" }}</td>
                         <td>{{ bill.units_used or 0 }}</td>
                         <td>{{ "{:,.0f}".format(bill.amount) }}</td>
                         <td>{{ bill.billing_month }}</td>
-                        <td>
+                        <td class="d-flex flex-column gap-1">
                             <a href="{{ url_for('receive_payment', bill_id=bill.bill_id) }}" 
-                               class="btn btn-sm btn-success d-flex align-items-center gap-1">
-                               <i class="bi bi-cash-coin"></i> Pokea
+                               class="btn btn-success d-flex align-items-center gap-1">
+                               <i class="bi bi-cash-coin"></i> Pokea Malipo
                             </a>
+                            {% if bill.customer_phone %}
+                            <a href="tel:{{ bill.customer_phone }}" class="call-btn">
+                                <i class="bi bi-telephone"></i> Mpigie Mteja
+                            </a>
+                            {% endif %}
                         </td>
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="8" class="text-muted">Hakuna bili zisizolipwa kwa sasa</td>
+                        <td colspan="9" class="text-muted">Hakuna bili zisizolipwa kwa sasa</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -210,7 +202,6 @@ h1 {
         </div>
 
     </div>
-
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>

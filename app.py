@@ -12,6 +12,9 @@ import re
 from functools import wraps
 import traceback
 import hashlib
+from functools import wraps
+from flask import session, redirect, url_for, flash
+
 
 def hash_password(password):
     # SHA256 hashing
@@ -37,18 +40,23 @@ def get_db_connection():
 # =======================
 # ✅ SINGLE ACCESS CONTROL (NEW)
 # =======================
-from functools import wraps
-from flask import session, redirect, url_for, flash
-from datetime import datetime
 
 def check_access(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        boss_id = session.get("boss_id")
-        if not boss_id:
+        # 🔹 Tambua role na boss_id
+        if "staff_id" in session:
+            boss_id = session.get("staff_boss_id")
+            role = "staff"
+        elif "boss_id" in session:
+            boss_id = session.get("boss_id")
+            role = "boss"
+        else:
             flash("Tafadhali ingia kwanza", "danger")
-            return redirect(url_for("boss_login"))
+            # staff login default
+            return redirect(url_for("staff_login"))
 
+        # 🔹 Pata info ya boss
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("""
@@ -61,18 +69,19 @@ def check_access(f):
 
         if not boss:
             flash("Session imeisha, ingia tena", "danger")
-            return redirect(url_for("boss_login"))
+            return redirect(url_for("staff_login"))
 
-        status = boss["status"]
         now = datetime.now()
+        status = boss["status"]
 
         # =========================
-        # 🔹 UPDATE TRIAL
+        # 🔹 Dynamic Time Check (Force)
         # =========================
-        if status == "TRIAL" and boss["trial_end_date"]:
-            try:
+        try:
+            # 🔹 TRIAL
+            if boss["trial_end_date"]:
                 trial_end = datetime.strptime(boss["trial_end_date"], "%Y-%m-%d %H:%M:%S")
-                if now > trial_end:
+                if now > trial_end and status == "TRIAL":
                     status = "TRIAL_EXPIRE"
                     conn = get_db_connection()
                     cur = conn.cursor()
@@ -82,16 +91,11 @@ def check_access(f):
                     if not session.get("trial_expired_shown"):
                         flash("Boss, trial imeisha. Wasiliana na admin ili kuendelea.", "warning")
                         session["trial_expired_shown"] = True
-            except:
-                pass
 
-        # =========================
-        # 🔹 UPDATE SUBSCRIPTION
-        # =========================
-        if status == "ACTIVE" and boss["subscription_end_date"]:
-            try:
+            # 🔹 SUBSCRIPTION
+            if boss["subscription_end_date"]:
                 sub_end = datetime.strptime(boss["subscription_end_date"], "%Y-%m-%d %H:%M:%S")
-                if now > sub_end:
+                if now > sub_end and status == "ACTIVE":
                     status = "SUBSCRIPTION_EXPIRE"
                     conn = get_db_connection()
                     cur = conn.cursor()
@@ -101,20 +105,28 @@ def check_access(f):
                     if not session.get("subscription_expired_shown"):
                         flash("Subscription imeisha. Tafadhali lipa ili kuendelea.", "warning")
                         session["subscription_expired_shown"] = True
-            except:
-                pass
+
+        except Exception as e:
+            # ⚠️ Safeguard: kama parsing ikishindwa, tunaendelea
+            print("⚠️ check_access datetime parsing error:", e)
 
         # =========================
-        # HARD BLOCK kwa vitendo vyote
+        # 🔥 HARD BLOCK (BOSS + STAFF)
         # =========================
         if status in ["TRIAL_EXPIRE", "SUBSCRIPTION_EXPIRE", "INACTIVE"]:
-            flash("⚠️ Huwezi kufanya vitendo hivi kwa sasa. Tafadhali lipia au wasiliana na support.", "warning")
-            return redirect(url_for("boss_dashboard"))
+            msg = "⚠️ Huduma ya boss imefungwa. Tafadhali wasiliana na Masoud (0744906763) ili kuendelea."
+            flash(msg, "danger")
 
+            # 🔁 Rudisha kulingana na role
+            if role == "staff":
+                return redirect(url_for("staff_dashboard"))
+            else:
+                return redirect(url_for("boss_dashboard"))
+
+        # ✅ End of checks, lete function
         return f(*args, **kwargs)
+
     return decorated_function
-
-
 
 
 # ================================
@@ -731,13 +743,7 @@ def check_subscription(boss_id):
     
     
   
-@app.route("/subscription_payment")
-def subscription_payment():
-    if "boss_id" not in session:
-        flash("Tafadhali ingia kwanza", "danger")
-        return redirect(url_for("boss_login"))
-    boss_id = session["boss_id"]
-    return render_template("subscription_payment.html", boss_id=boss_id)
+
 
 @app.route("/superadmin/customer/<customer_id>/meters")
 def superadmin_customer_meters(customer_id):
@@ -875,7 +881,7 @@ def toggle_boss(boss_id):
         cur.execute("UPDATE boss SET status='INACTIVE', subscription_end_date=NULL WHERE boss_id=?", (boss_id,))
     else:
         # Enable boss and set subscription_end_date
-        subscription_end = now + timedelta(minutes=2)  # testing duration
+        subscription_end = now + timedelta(minutes=20)  # testing duration
         cur.execute("""
             UPDATE boss
             SET status='ACTIVE', subscription_end_date=?
@@ -1140,14 +1146,14 @@ def boss_login():
         # ===============================
         if boss["status"] == "TRIAL":
             flash(
-                "Karibu ! umeanza kutumia mfumo. Mara baada ya kutumia mfumo huu tafadhali tupatie maoni yako ili tuendelee kuboresha huduma zetu (ph.0745906763).",
+                "Karibu ! umeanza kutumia mfumo. Mara baada ya kutumia mfumo huu tafadhali tupatie maoni yako ili tuendelee kuboresha huduma zetu (ph.0744906763).",
                 "info"
             )
         elif boss["status"] == "ACTIVE":
             flash(f"Karibu tena, {boss['full_name']}! Tuna furaha kukuona hapa.", "success")
         elif boss["status"] in ["TRIAL_EXPIRE", "SUBSCRIPTION_EXPIRE"]:
             flash(
-                f"Karibu tena, {boss['full_name']}! Mfumo una restrictions kutokana na trial/subscription. Huwezi kusoma meter au kupokea malipo.",
+                f"Karibu tena, {boss['full_name']}! Mfumo una restrictions kutokana na subscription. Hivyo kuna huduma kadhaa zimesitishwa  mpaka utakapo changia  kwa mawasiliano  piga : (0744906763 )  iliuweze kuchangia   ftom - Masoud.",
                 "warning"
             )
 
@@ -1207,12 +1213,7 @@ def boss_announcements():
 # ==============================
 # Route ya kulipa subscription ya boss
 # ==============================
-@app.route("/receive_subscription_payment/<boss_id>")
-def receive_subscription_payment(boss_id):
-    # Hapa unaweza call API ya malipo (PayPal, Paystack, etc)
-    return render_template("receive_subscription_payment.html", boss_id=boss_id)
-    
-    
+
 
 @app.route("/boss/set_new_pin", methods=["GET", "POST"])
 def boss_set_new_pin():
@@ -1304,10 +1305,7 @@ def boss_dashboard():
     if on_trial:
         boss_message = "Umepata muda wa trial, tafadhali jaribu mfumo na tupe maoni yako."
     elif subscription_expired:
-        boss_message = "Muda wako wa kutumia mfumo umeisha. Tafadhali lipa ili kuendelea."
-        conn.close()
-        flash(boss_message, "danger")
-        return redirect(url_for("subscription_payment", boss_id=boss_id))
+        boss_message = "Muda wako wa kutumia mfumo umeisha lakini bado unaweza kutumia mfumo."
     else:
         boss_message = "Subscription yako ni active, unaendelea kutumia huduma."
 
@@ -1352,7 +1350,6 @@ def boss_dashboard():
         WHERE c.boss_id=?
     """, (boss_id,)).fetchone()['total'] or 0
 
-    # 🔹 Hapa tumebadilisha kutoka created_at kwenda paid_at
     today_str = datetime.now().strftime("%Y-%m-%d")
     today_total = conn.execute("""
         SELECT SUM(amount_paid) as total
@@ -1373,6 +1370,16 @@ def boss_dashboard():
             AND b2.billing_month = strftime('%Y-%m','now')
         )
     """, (boss_id,)).fetchone()["total"] or 0
+
+    # 🔥 NEW: Meter zilizosomwa leo
+    meters_today = conn.execute("""
+        SELECT COUNT(*) as total
+        FROM meter_readings mr
+        JOIN meters m ON mr.meter_id = m.meter_id
+        JOIN customers c ON m.customer_id = c.customer_id
+        WHERE mr.reading_date = ?
+        AND c.boss_id = ?
+    """, (today_str, boss_id)).fetchone()["total"] or 0
 
     meters_map = {}
     for m in meters_raw:
@@ -1435,14 +1442,14 @@ def boss_dashboard():
         unpaid_bills=unpaid_bills,
         total_unpaid_amount=total_unpaid_amount,
         total_payments=total_payments,
-        today_total=today_total,  # ✅ Hapa kadi ya Makusanyo ya Leo inafanya kazi
+        today_total=today_total,
         skipped_meters=skipped_meters,
         recent_logs=recent_logs,
         show_welcome=show_welcome,
         announcement=show_announcement,
-        boss_message=boss_message
+        boss_message=boss_message,
+        meters_today=meters_today  # 🔥 NEW VARIABLE
     )
-
 
 
 from werkzeug.security import generate_password_hash
@@ -1865,17 +1872,13 @@ def delete_customer(customer_id):
 # ================= READ METER =====================
 
 
-
 @app.route("/read_meter", methods=["GET", "POST"])
 @check_access
 def read_meter():
-
-    # Hakikisha staff au boss ameloga
     if "staff_id" not in session and "boss_id" not in session:
         flash("Tafadhali ingia kwanza", "danger")
-        return redirect(url_for("login"))
+        return redirect(url_for("staff_login"))
 
-    # Amua role na user_id
     if "staff_id" in session:
         user_role = "staff"
         user_id = session.get("staff_id")
@@ -1887,11 +1890,9 @@ def read_meter():
 
     conn = get_db_connection()
     cur = conn.cursor()
-
     bill = None
 
     if request.method == "POST":
-
         meter_number = request.form.get("meter_number")
         current_reading = request.form.get("current_reading")
 
@@ -1899,31 +1900,28 @@ def read_meter():
             flash("Tafadhali jaza meter number na reading", "danger")
             return render_template("read_meter.html", bill=None)
 
-        # 🔹 Ultra safe validation
         if not re.match(r'^[0-9]+(\.[0-9]+)?$', current_reading):
             flash("⚠️ Reading lazima iwe namba halisi positive", "danger")
             return render_template("read_meter.html", bill=None)
 
         current_reading = float(current_reading)
-        if current_reading <= 0 or current_reading > 100000:
+        if current_reading < 0 or current_reading > 100000:
             flash("⚠️ Reading iko nje ya range sahihi", "danger")
             return render_template("read_meter.html", bill=None)
 
-        # 🔹 Angalia meter ipo
         cur.execute("""
-            SELECT m.meter_id, m.customer_id, m.status AS meter_status, c.full_name, c.status AS customer_status
+            SELECT m.meter_id, m.customer_id, m.status AS meter_status,
+                   c.full_name, c.status AS customer_status
             FROM meters m
             JOIN customers c ON m.customer_id = c.customer_id
             WHERE m.meter_number=? AND c.boss_id=?
         """, (meter_number, boss_id))
-
         meter = cur.fetchone()
         if not meter:
             flash("Meter hii haipo au sio ya wateja wako", "danger")
             conn.close()
             return render_template("read_meter.html", bill=None)
 
-        # 🔹 Kagua customer status kwanza
         if meter["customer_status"] != "ACTIVE":
             flash(f"⚠️ Hauwezi kusoma meter ya mteja {meter['full_name']} kwa sababu status yake ni {meter['customer_status']}.", "warning")
             conn.close()
@@ -1936,7 +1934,6 @@ def read_meter():
 
         billing_month = datetime.now().strftime("%Y-%m")
 
-        # 🔹 Tafuta last reading
         cur.execute("""
             SELECT current_reading, billing_month FROM bills
             WHERE meter_id=?
@@ -1947,8 +1944,22 @@ def read_meter():
 
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+        # 🔥 NEW: tarehe ya leo kwa meter_readings
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        # 🔥 NEW: Zuia duplicate reading kwa siku moja
+        cur.execute("""
+            SELECT 1 FROM meter_readings
+            WHERE meter_id=? AND reading_date=?
+        """, (meter["meter_id"], today))
+        already_read = cur.fetchone()
+
+        if already_read:
+            flash("⚠️ Meter hii tayari imeshasomwa leo.", "warning")
+            conn.close()
+            return render_template("read_meter.html", bill=None)
+
         if not last_bill:
-            # Meter mpya → insert baseline reading tu, hakuna bill
             cur.execute("""
                 INSERT INTO bills
                 (bill_id, customer_id, meter_id, previous_reading, current_reading, units_used,
@@ -1958,71 +1969,83 @@ def read_meter():
                 "BILL-" + str(uuid.uuid4())[:8],
                 meter["customer_id"],
                 meter["meter_id"],
-                0,                 # previous_reading
-                current_reading,   # current_reading
-                0,                 # units_used = 0 kwa baseline
-                0,                 # amount = 0
-                billing_month,
-                'BASELINE',        # status BASELINE
-                now
+                0, current_reading, 0, 0,
+                billing_month, 'BASELINE', now
             ))
+
+            # 🔥 NEW: Save kwenye meter_readings
+            cur.execute("""
+                INSERT INTO meter_readings
+                (reading_id, meter_id, reading_value, reading_date, recorded_by)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                "READ-" + str(uuid.uuid4())[:8],
+                meter["meter_id"],
+                current_reading,
+                today,
+                user_id
+            ))
+
             conn.commit()
             flash(f"✅ Reading imehifadhiwa kama baseline. Bill bado haijajengwa.", "success")
             conn.close()
             return render_template("read_meter.html", bill=None)
 
-        # Meter tayari imekuwa na reading awali
         previous_reading = last_bill["current_reading"]
         last_billing_month = last_bill["billing_month"]
 
-        if last_billing_month == billing_month:
-            flash(f"⚠️ Tafadhari meter hii tayari imesha somwa mwezi huu  (meter husomwa mara moja tu ndani ya mwezi ).", "info")
+        # 🔥 NEW: Check kama reading haijabadilika
+        if previous_reading is not None and current_reading == previous_reading:
+            flash("⚠️ Hakuna matumizi (reading haijabadilika)", "info")
             conn.close()
             return render_template("read_meter.html", bill=None)
 
-        # 🔹 Calculate units used na generate bill
+        if last_billing_month == billing_month:
+            flash(f"⚠️ Tafadhari meter hii tayari imesha somwa mwezi huu.", "info")
+            conn.close()
+            return render_template("read_meter.html", bill=None)
+
         units_used = current_reading - previous_reading
         if units_used < 0:
             flash("⚠️ Reading mpya haiwezi kuwa ndogo kuliko ya mwisho", "danger")
             conn.close()
             return render_template("read_meter.html", bill=None)
 
-        # 🔹 Pata tariff
         cur.execute("""
             SELECT price_per_unit FROM tariffs
             WHERE boss_id=? ORDER BY created_at DESC LIMIT 1
         """, (boss_id,))
         tariff = cur.fetchone()
-
-        # 🔹 SAFEGUARD: Hakuna tariff hauruhusiwi kuunda bill
         if not tariff:
             flash("⚠️ Hakuna tariff iliyowekwa. Tafadhali weka price per unit kwanza.", "danger")
             conn.close()
             return render_template("read_meter.html", bill=None)
 
-        price_per_unit = tariff["price_per_unit"]
-        amount = units_used * price_per_unit
+        amount = units_used * tariff["price_per_unit"]
         bill_id = "BILL-" + str(uuid.uuid4())[:8]
 
-        # 🔹 Insert bill mpya
         cur.execute("""
             INSERT INTO bills
-            (bill_id, customer_id, meter_id,
-             previous_reading, current_reading, units_used,
-             amount, billing_month, status, created_at)
+            (bill_id, customer_id, meter_id, previous_reading, current_reading,
+             units_used, amount, billing_month, status, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (bill_id, meter["customer_id"], meter["meter_id"],
+              previous_reading, current_reading, units_used, amount,
+              billing_month, 'UNPAID', now))
+
+        # 🔥 NEW: Save kwenye meter_readings
+        cur.execute("""
+            INSERT INTO meter_readings
+            (reading_id, meter_id, reading_value, reading_date, recorded_by)
+            VALUES (?, ?, ?, ?, ?)
         """, (
-            bill_id,
-            meter["customer_id"],
+            "READ-" + str(uuid.uuid4())[:8],
             meter["meter_id"],
-            previous_reading,
             current_reading,
-            units_used,
-            amount,
-            billing_month,
-            'UNPAID',
-            now
+            today,
+            user_id
         ))
+
         conn.commit()
 
         bill = {
@@ -2037,9 +2060,6 @@ def read_meter():
         flash(f"✅ Bill imejengwa kwa {meter_number} ({meter['full_name']})", "success")
 
     return render_template("read_meter.html", bill=bill)
-
-
-
 
 
 @app.route("/boss/meters")
@@ -2304,7 +2324,7 @@ def unread_meters():
 def unpaid_bills():
     """
     Route ya kuonyesha bills zisizolipwa kwa kila role.
-    Kila bill ina meter yake halisi, hakuna duplication au 'Hakuna'.
+    Kila bill ina meter yake halisi na namba ya simu ya mteja.
     """
     # ======== Hakikisha user ameloga ========
     if "boss_id" in session:
@@ -2328,6 +2348,7 @@ def unpaid_bills():
         bills = conn.execute("""
             SELECT b.bill_id, b.customer_id, b.units_used, b.amount, b.billing_month,
                    c.full_name AS customer_name,
+                   c.phone AS customer_phone,
                    m.meter_number
             FROM bills b
             JOIN customers c ON b.customer_id = c.customer_id
@@ -2339,6 +2360,7 @@ def unpaid_bills():
         bills = conn.execute("""
             SELECT b.bill_id, b.customer_id, b.units_used, b.amount, b.billing_month,
                    c.full_name AS customer_name,
+                   c.phone AS customer_phone,
                    m.meter_number
             FROM bills b
             JOIN customers c ON b.customer_id = c.customer_id
@@ -2351,7 +2373,6 @@ def unpaid_bills():
 
     # ======== Return template ========
     return render_template("unpaid_bills.html", unpaid_bills=bills, user_role=user_role)
-                               
 
 
 @app.route("/boss/customers")
@@ -2556,48 +2577,38 @@ def toggle_customer(customer_id):
     
     
 # ================= RECEIVE PAYMENT =====================
-
 @app.route("/receive_payment/<bill_id>", methods=["GET", "POST"])
+@check_access  # 🔹 apply check_access decorator
 def receive_payment(bill_id):
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    # 1️⃣ Role-based login check
+    # 🔹 Amua role na boss
     if "staff_id" in session:
         user_role = "staff"
         user_id = session["staff_id"]
         dashboard_route = "staff_dashboard"
         user_name = session.get("staff_name")
         boss_id_for_record = session.get("staff_boss_id")
-    elif "boss_id" in session:
+    else:
         user_role = "boss"
         user_id = session["boss_id"]
         dashboard_route = "boss_dashboard"
         user_name = session.get("boss_name")
         boss_id_for_record = user_id
-    else:
-        flash("Tafadhali login kwanza", "danger")
-        # Default fallback kwa staff login
-        return redirect(url_for("staff_login"))
 
-    # 2️⃣ Kagua status ya boss
+    # 🔹 Kagua status ya boss (dynamic, lakini decorator pia imehakikisha)
     boss_status = cursor.execute(
         "SELECT status FROM boss WHERE boss_id=?", 
         (boss_id_for_record,)
     ).fetchone()
-
     if not boss_status:
         conn.close()
         flash("Boss haipo kwenye mfumo", "danger")
         return redirect(url_for(dashboard_route))
 
-    if boss_status["status"] != "ACTIVE":
-        conn.close()
-        flash("Tafadhari huwezi kurekodi malipo ya bill kwasasa : wasiiliana na masoud (0744906763)", "danger")
-        return redirect(url_for(dashboard_route))
-
-    # 3️⃣ Pata bill info
+    # 🔹 Pata bill info
     bill = cursor.execute("""
         SELECT b.*, c.full_name AS customer_name, c.customer_id,
                m.meter_number
@@ -2606,22 +2617,19 @@ def receive_payment(bill_id):
         LEFT JOIN meters m ON c.customer_id = m.customer_id
         WHERE b.bill_id=?
     """, (bill_id,)).fetchone()
-
     if not bill:
         conn.close()
         flash("Bili haipo", "danger")
         return redirect(url_for(dashboard_route))
 
-    # 4️⃣ POST: process payment
+    # 🔹 POST: process payment
     if request.method == "POST":
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         payment_id = "PAY-" + uuid.uuid4().hex[:8]
         receipt_id = "RCPID-" + uuid.uuid4().hex[:8]
-
-        # Generate receipt number
         year = datetime.now().year
         count = cursor.execute("SELECT COUNT(*) FROM receipts").fetchone()[0] + 1
         receipt_number = f"RCP-{year}-{str(count).zfill(5)}"
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         # ✅ Insert payment
         cursor.execute("""
@@ -2680,7 +2688,7 @@ def receive_payment(bill_id):
         flash("Malipo yamepokelewa na risiti imetengenezwa!", "success")
         return redirect(url_for("view_receipt", receipt_id=receipt_id))
 
-    # 5️⃣ GET: show confirmation page
+    # 🔹 GET: show confirmation page
     conn.close()
     return render_template("confirm_payment.html", bill=bill, dashboard_route=dashboard_route)
 
@@ -3147,46 +3155,32 @@ def staff_view_customers():
 # ============================================================
 # Route: Boss Monthly Report
 # ============================================================
+
+
 @app.route("/boss/monthly_report")
 def boss_monthly_report():
-
-    # ------------------------------------------------
-    # AUTHENTICATION CHECK
-    # ------------------------------------------------
-    # Hakikisha boss amelogin kabla ya kupata report
-    # Hii inalinda data dhidi ya unauthorized access
+    # ----------------------------------------
+    # Authentication check
+    # ----------------------------------------
     if "boss_id" not in session:
         flash("Tafadhali ingia kwanza", "danger")
         return redirect(url_for("boss_login"))
 
-    # Chukua boss_id kutoka kwenye session
     boss_id = session["boss_id"]
-
-    # Chukua mwezi kutoka query parameters (GET request)
-    # Mfano: /boss/monthly_report?month=2026-03
-    month = request.args.get("month")
-
-    # ------------------------------------------------
-    # INPUT VALIDATION
-    # ------------------------------------------------
-    # Hakikisha mwezi umechaguliwa kabla ya kuendelea
+    month = request.args.get("month")  # format YYYY-MM
     if not month:
         flash("Chagua mwezi!", "warning")
         return redirect(url_for("boss_dashboard"))
 
-    # ------------------------------------------------
-    # DATABASE CONNECTION
-    # ------------------------------------------------
+    # ----------------------------------------
+    # Database connection
+    # ----------------------------------------
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # ------------------------------------------------
-    # FETCH: MONTHLY BILLS DATA
-    # ------------------------------------------------
-    # - Inachukua bills zote za mwezi husika
-    # - JOIN na customers ili kupata jina la mteja
-    # - Inachuja kwa boss_id (data isolation 🔒)
-    # - ORDER BY DESC → records mpya juu
+    # ----------------------------------------
+    # Fetch monthly bills (join customers)
+    # ----------------------------------------
     cur.execute("""
         SELECT 
             b.bill_id,
@@ -3196,7 +3190,7 @@ def boss_monthly_report():
             b.units_used,
             b.amount,
             b.status,
-            b.billing_month,
+            b.created_at,
             b.payment_method,
             b.payment_date
         FROM bills b
@@ -3206,64 +3200,37 @@ def boss_monthly_report():
         ORDER BY b.bill_id DESC
     """, (boss_id, month))
 
-    # Pata records zote za bills
     bills = cur.fetchall()
 
-    # ------------------------------------------------
-    # DATA AGGREGATION (REPORT CALCULATIONS)
-    # ------------------------------------------------
-
-    # Jumla ya units zote (paid + unpaid)
+    # ----------------------------------------
+    # Aggregation & stats
+    # ----------------------------------------
     total_units = sum(b["units_used"] for b in bills)
-
-    # Jumla ya amount yote (mapato yanayotarajiwa)
     total_amount = sum(b["amount"] for b in bills)
-
-    # ----------------------------------------
-    # STATUS-BASED ANALYSIS
-    # ----------------------------------------
-
-    # Idadi ya bills zilizolipwa (PAID)
-    # .upper() → kuhakikisha consistency hata kama DB ina tofauti ya case
     paid_count = sum(1 for b in bills if b["status"].upper() == "PAID")
-
-    # Idadi ya bills ambazo bado hazijalipwa (UNPAID)
     unpaid_count = sum(1 for b in bills if b["status"].upper() == "UNPAID")
+    total_paid_units = sum(b["units_used"] for b in bills if b["status"].upper() == "PAID")
+    total_paid_amount = sum(b["amount"] for b in bills if b["status"].upper() == "PAID")
 
-    # ----------------------------------------
-    # PAID-ONLY METRICS (REAL REVENUE)
-    # ----------------------------------------
+    # Count new meters (status NEW / BASELINE) if needed
+    new_count = sum(1 for b in bills if b["status"].upper() == "BASELINE")
 
-    # Units zilizolipwa pekee (actual consumption paid)
-    total_paid_units = sum(
-        b["units_used"] for b in bills if b["status"].upper() == "PAID"
-    )
-
-    # Amount iliyolipwa pekee (actual revenue)
-    total_paid_amount = sum(
-        b["amount"] for b in bills if b["status"].upper() == "PAID"
-    )
-
-    # ------------------------------------------------
-    # CLEANUP
-    # ------------------------------------------------
-    # Funga DB connection baada ya matumizi
     conn.close()
 
-    # ------------------------------------------------
-    # RENDER TEMPLATE (VIEW LAYER)
-    # ------------------------------------------------
-    # Tuma data zote kwa frontend kwa ajili ya display/reporting
+    # ----------------------------------------
+    # Render template
+    # ----------------------------------------
     return render_template(
         "boss_monthly_report.html",
-        bills=bills,                      # Raw data ya bills
-        month=month,                      # Mwezi uliochaguliwa
-        total_units=total_units,          # Total units zote
-        total_amount=total_amount,        # Total expected revenue
-        paid_count=paid_count,            # Idadi ya waliolipa
-        unpaid_count=unpaid_count,        # Idadi ya wasiolipa
-        total_paid_units=total_paid_units,# Units zilizolipwa
-        total_paid_amount=total_paid_amount # Revenue halisi
+        bills=bills,
+        month=month,
+        total_units=total_units,
+        total_amount=total_amount,
+        paid_count=paid_count,
+        unpaid_count=unpaid_count,
+        total_paid_units=total_paid_units,
+        total_paid_amount=total_paid_amount,
+        new_count=new_count
     )
             
 # ============================================================

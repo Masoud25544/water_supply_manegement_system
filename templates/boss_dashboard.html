@@ -25,6 +25,37 @@
         body.dark-mode .watermark-text { color: rgba(255,255,255,0.08); }
         @media(max-width: 768px){ .table-responsive { max-height: 350px; } .d-flex.flex-wrap.gap-2 .btn { font-size: 0.85rem; padding: 0.4rem 0.6rem; } }
         .alert { border-radius: 8px; font-size: 0.95rem; transition: all 0.3s; }
+        /* ===== Flash Messages Custom Styles ===== */
+.alert {
+    font-size: 1.5rem;      /* ongeza ukubwa wa maneno */
+    font-weight: bold;      /* maneno ya kuangazia */
+    letter-spacing: 0.5px;  /* nafasi kidogo kati ya maneno */
+    padding: 15px 20px;     /* kuongeza padding */
+    border-radius: 12px;    /* rounded corners */
+    box-shadow: 4px 4px 15px rgba(0,0,0,0.15); /* 3D shadow effect */
+    transition: all 0.3s ease-in-out;
+}
+
+/* Rangi za flash kwa Bootstrap categories */
+.alert-danger {
+    background: linear-gradient(145deg, #dc3545, #ff5c6c);
+    color: #fff;
+}
+
+.alert-warning {
+    background: linear-gradient(145deg, #ffc107, #ffe066);
+    color: #000;
+}
+
+.alert-success {
+    background: linear-gradient(145deg, #28a745, #5cd65c);
+    color: #fff;
+}
+
+.alert-info {
+    background: linear-gradient(145deg, #17a2b8, #4dd0e1);
+    color: #fff;
+}
     </style>
 </head>
 <body>
@@ -59,7 +90,7 @@
             <p>Mfumonhuu umejengwa na MASOUD TECH SOLUTION kwa lengo la kusaidia:</p>
             <ul>
                 <li>Kuratibu na kusimamia wateja wako kwa usahihi</li>
-                <li>Kusimamia malipo na bills za wateja</li>
+                <li>Kusimamia malipo na bills za wateja wako kwa usahihi</li>
                 <li>Kusimamia meters na usomaji wake kwa usahihi</li>
                 <li>Kudhibiti upotevu wa maji na kufuatilia madeni kwa usahihi</li>
             </ul>
@@ -85,7 +116,8 @@
                 {"icon": "bi-cash-stack", "label": "Pesa unayo dai", "value": total_unpaid_amount, "color": "warning"},
                 {"icon": "bi-credit-card", "label": "Jumla Malipo", "value": total_payments, "color": "info"},
                 {"icon": "bi-currency-dollar", "label": "Mapato ya Leo", "value": today_total, "color": "success"},
-                {"icon": "bi-exclamation-triangle-fill", "label": "Meter zinazo hitaji kusomwa", "value": skipped_meters, "color": "dark"}
+                {"icon": "bi-exclamation-triangle-fill", "label": "Meter zinazo hitaji kusomwa", "value": skipped_meters, "color": "dark"},
+                {"icon": "bi-speedometer2", "label": "Meter Zilizosomwa Leo", "value": meters_today, "color": "primary"}
             ] %}
             {% for stat in stats %}
             <div class="col-md-2 col-6">
