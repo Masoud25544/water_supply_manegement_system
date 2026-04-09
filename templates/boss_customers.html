@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
 
     <style>
         body {
@@ -39,6 +40,9 @@
         .badge-closed { background: #f8d7da; color: #842029; font-weight: 500; }
         .badge-meter-active { background: #cfe2ff; color: #084298; }
         .badge-meter-inactive { background: #e2e3e5; color: #41464b; }
+
+        /* Modal button styles */
+        .btn-sm { margin: 2px; }
     </style>
 </head>
 
@@ -114,6 +118,7 @@
                         </td>
 
                         <td class="d-flex flex-wrap gap-1">
+
                             <a href="{{ url_for('boss_add_meter', customer_id=c.customer_id) }}" class="btn btn-sm btn-success">+ Meter</a>
                             <a href="{{ url_for('toggle_customer', customer_id=c.customer_id) }}" class="btn btn-sm btn-warning">
                                 {% if c.customer_status == 'ACTIVE' %}Fungia{% else %}Fungua{% endif %}
@@ -130,8 +135,32 @@
 
                             <a href="{{ url_for('edit_customer', customer_id=c.customer_id) }}" class="btn btn-sm btn-info text-white">Edit</a>
 
-                            <!-- Delete sasa inapeleka kwenye template ya kuthibitisha -->
-                            <a href="{{ url_for('confirm_delete_customer', customer_id=c.customer_id) }}" class="btn btn-sm btn-danger">Delete</a>
+                            <!-- ✅ Delete Button using Modal -->
+                            <button type="button" class="btn btn-sm btn-danger" data-bs-toggle="modal" data-bs-target="#deleteModal{{ c.customer_id }}">
+                                Delete
+                            </button>
+
+                            <!-- Modal -->
+                            <div class="modal fade" id="deleteModal{{ c.customer_id }}" tabindex="-1" aria-labelledby="deleteModalLabel{{ c.customer_id }}" aria-hidden="true">
+                              <div class="modal-dialog modal-dialog-centered">
+                                <div class="modal-content">
+                                  <div class="modal-header bg-danger text-white">
+                                    <h5 class="modal-title" id="deleteModalLabel{{ c.customer_id }}"><i class="bi bi-exclamation-triangle-fill me-2"></i> Thibitisha Kufuta</h5>
+                                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                                  </div>
+                                  <div class="modal-body">
+                                    <p class="fw-semibold">Kitendo hiki ni hatari. Kufuta mteja <strong>{{ c.customer_name }}</strong> kutafuta pia mita zote na data zinazohusiana.</p>
+                                    <p>Una hakika unataka kuendelea?</p>
+                                  </div>
+                                  <div class="modal-footer">
+                                    <form method="POST" action="{{ url_for('delete_customer', customer_id=c.customer_id) }}">
+                                        <button type="submit" class="btn btn-danger">Thibitisha Kufuta</button>
+                                    </form>
+                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Rudia</button>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
                         </td>
                     </tr>
                 {% else %}

@@ -1809,7 +1809,7 @@ def deactivate_customer(customer_id):
 
     # 🔁 Rudisha boss kwenye dashboard
     return redirect(url_for("boss_dashboard"))
-
+    
 
 
 @app.route("/boss/delete_customer/<customer_id>", methods=["GET", "POST"])
@@ -1822,7 +1822,9 @@ def delete_customer(customer_id):
     boss_id = session["boss_id"]
     boss_name = session.get("boss_name")
 
+    # 🔌 Fungua connection na row_factory ili customer['full_name'] ifanye kazi
     conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 
     # 2️⃣ Pata info ya mteja
@@ -1846,7 +1848,63 @@ def delete_customer(customer_id):
             # delete customer
             cur.execute("DELETE FROM customers WHERE customer_id=?", (customer_id,))
 
-            # record activity log with timestamp
+            # 🔥 record activity log with timestamp
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            cur.execute("""
+                INSERT INTO activity_logs (user_name, role, action, details, boss_id, time)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                boss_name,
+                "boss",
+                "Delete Customer",
+                f"Customer {customer['full_name']} ({customer_id}) deleted",
+                boss_id,
+                now
+            ))
+
+            # Commit ili kuhakikisha delete na log zote zinaenda
+            conn.commit()
+
+            flash(f"Mteja {customer['full_name']} ameondolewa kwa ufanisi!", "success")
+        except Exception as e:  # 🔥 capture errors zote, sio sqlite tu
+            conn.rollback()
+            flash(f"Kosa limejitokeza: {e}", "danger")
+        finally:
+            conn.close()
+
+        # Rudisha boss dashboard baada ya delete
+        return redirect(url_for("boss_dashboard"))
+
+    boss_id = session["boss_id"]
+    boss_name = session.get("boss_name")
+
+    # 🔌 Fungua connection na row_factory
+    conn = get_db_connection()
+    conn.row_factory = sqlite3.Row  # 🔥 Hii inaruhusu customer['full_name'] kufanya kazi
+    cur = conn.cursor()
+
+    # 2️⃣ Pata info ya mteja
+    cur.execute("SELECT * FROM customers WHERE customer_id=?", (customer_id,))
+    customer = cur.fetchone()
+    if not customer:
+        flash("Mteja haipo kwenye mfumo", "danger")
+        conn.close()
+        return redirect(url_for("boss_dashboard"))
+
+    # 3️⃣ GET request: onyesha confirmation page
+    if request.method == "GET":
+        conn.close()
+        return render_template("confirm_delete_customer.html", customer=customer)
+
+    # 4️⃣ POST request: thibitisha kufuta
+    if request.method == "POST":
+        try:
+            # delete meters associated na mteja
+            cur.execute("DELETE FROM meters WHERE customer_id=?", (customer_id,))
+            # delete customer
+            cur.execute("DELETE FROM customers WHERE customer_id=?", (customer_id,))
+
+            # 🔥 record activity log with timestamp
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             cur.execute("""
                 INSERT INTO activity_logs (user_name, role, action, details, boss_id, time)
@@ -1862,12 +1920,14 @@ def delete_customer(customer_id):
 
             conn.commit()
             flash(f"Mteja {customer['full_name']} ameondolewa kwa ufanisi!", "success")
-        except sqlite3.Error as e:
+        except Exception as e:  # 🔥 Badilisha sqlite3.Error → Exception ili kushika error zote
             flash(f"Kosa la database: {e}", "danger")
         finally:
             conn.close()
 
         return redirect(url_for("boss_dashboard"))
+
+
     
 # ================= READ METER =====================
 
@@ -2226,6 +2286,7 @@ def boss_tariff():
     
     
 # ================= UNREAD METERS =====================
+
 @app.route("/unread_meters", methods=["GET", "POST"])
 def unread_meters():
     # 1️⃣ Hakikisha boss au staff ana-login
@@ -2317,7 +2378,7 @@ def unread_meters():
         message=None,
         current_month=current_month,
         role=role
-    )
+    )    
    
 
 @app.route("/unpaid_bills")
@@ -3156,7 +3217,6 @@ def staff_view_customers():
 # Route: Boss Monthly Report
 # ============================================================
 
-
 @app.route("/boss/monthly_report")
 def boss_monthly_report():
     # ----------------------------------------
@@ -3232,7 +3292,6 @@ def boss_monthly_report():
         total_paid_amount=total_paid_amount,
         new_count=new_count
     )
-            
 # ============================================================
 # Route: Search Customer (Boss Only)
 # ============================================================
