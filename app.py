@@ -3,43 +3,80 @@
 # =======================
 from flask import Flask, render_template, request, redirect, url_for, flash, session
 from werkzeug.security import generate_password_hash, check_password_hash
+from flask import render_template, session, redirect, url_for, flash
 import sqlite3
-from datetime import datetime, timedelta
+import os
 import uuid
 import random
 import string
 import re
-from functools import wraps
 import traceback
 import hashlib
+from flask import jsonify
+from datetime import datetime, timedelta
 from functools import wraps
-from flask import session, redirect, url_for, flash
 
 
+
+# =======================
+# 2️⃣ Helper Functions
+# =======================
 def hash_password(password):
-    # SHA256 hashing
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
+
 
 def generate_staff_id():
     return "STF-" + str(uuid.uuid4())[:8]
 
+
+# =======================
+# 3️⃣ Flask Setup
+# =======================
+import os
+import sqlite3
+from flask import Flask
+
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
+
 DB_PATH = "water_supply.db"
 
 
 # =======================
-# DB CONNECTION
+
+# 🔗 DATABASE CONNECTION
 # =======================
+
 def get_db_connection():
+    DATABASE_URL = os.getenv("DATABASE_URL")
+
+    if DATABASE_URL:
+        if DATABASE_URL.startswith("postgres://"):
+            DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+        import psycopg2
+        import psycopg2.extras
+
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        return conn, cur, "postgres"
+
+    import sqlite3
+
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    return conn
+    cur = conn.cursor()
+
+    return conn, cur, "sqlite"
 
 
-# =======================
-# ✅ SINGLE ACCESS CONTROL (NEW)
-# =======================
+    
+def db_execute(cur, db_type, query, params):
+    if db_type == "sqlite":
+        query = query.replace("%s", "?")
+    cur.execute(query, params)    
+
 
 def check_access(f):
     @wraps(f)
@@ -53,17 +90,24 @@ def check_access(f):
             role = "boss"
         else:
             flash("Tafadhali ingia kwanza", "danger")
-            # staff login default
             return redirect(url_for("staff_login"))
 
         # 🔹 Pata info ya boss
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT status, trial_end_date, subscription_end_date 
-            FROM boss 
-            WHERE boss_id = ?
-        """, (boss_id,))
+        conn, cur, db_type = get_db_connection()
+
+        if db_type == "postgres":
+            cur.execute("""
+                SELECT status, trial_end_date, subscription_end_date 
+                FROM boss 
+                WHERE boss_id = %s
+            """, (boss_id,))
+        else:
+            cur.execute("""
+                SELECT status, trial_end_date, subscription_end_date 
+                FROM boss 
+                WHERE boss_id = ?
+            """, (boss_id,))
+
         boss = cur.fetchone()
         conn.close()
 
@@ -83,11 +127,23 @@ def check_access(f):
                 trial_end = datetime.strptime(boss["trial_end_date"], "%Y-%m-%d %H:%M:%S")
                 if now > trial_end and status == "TRIAL":
                     status = "TRIAL_EXPIRE"
-                    conn = get_db_connection()
-                    cur = conn.cursor()
-                    cur.execute("UPDATE boss SET status=? WHERE boss_id=?", (status, boss_id))
+
+                    conn, cur, db_type = get_db_connection()
+
+                    if db_type == "postgres":
+                        cur.execute(
+                            "UPDATE boss SET status=%s WHERE boss_id=%s",
+                            (status, boss_id)
+                        )
+                    else:
+                        cur.execute(
+                            "UPDATE boss SET status=? WHERE boss_id=?",
+                            (status, boss_id)
+                        )
+
                     conn.commit()
                     conn.close()
+
                     if not session.get("trial_expired_shown"):
                         flash("Boss, trial imeisha. Wasiliana na admin ili kuendelea.", "warning")
                         session["trial_expired_shown"] = True
@@ -97,17 +153,28 @@ def check_access(f):
                 sub_end = datetime.strptime(boss["subscription_end_date"], "%Y-%m-%d %H:%M:%S")
                 if now > sub_end and status == "ACTIVE":
                     status = "SUBSCRIPTION_EXPIRE"
-                    conn = get_db_connection()
-                    cur = conn.cursor()
-                    cur.execute("UPDATE boss SET status=? WHERE boss_id=?", (status, boss_id))
+
+                    conn, cur, db_type = get_db_connection()
+
+                    if db_type == "postgres":
+                        cur.execute(
+                            "UPDATE boss SET status=%s WHERE boss_id=%s",
+                            (status, boss_id)
+                        )
+                    else:
+                        cur.execute(
+                            "UPDATE boss SET status=? WHERE boss_id=?",
+                            (status, boss_id)
+                        )
+
                     conn.commit()
                     conn.close()
+
                     if not session.get("subscription_expired_shown"):
                         flash("Subscription imeisha. Tafadhali lipa ili kuendelea.", "warning")
                         session["subscription_expired_shown"] = True
 
         except Exception as e:
-            # ⚠️ Safeguard: kama parsing ikishindwa, tunaendelea
             print("⚠️ check_access datetime parsing error:", e)
 
         # =========================
@@ -117,76 +184,63 @@ def check_access(f):
             msg = "⚠️ Huduma ya boss imefungwa. Tafadhali wasiliana na Masoud (0744906763) ili kuendelea."
             flash(msg, "danger")
 
-            # 🔁 Rudisha kulingana na role
             if role == "staff":
                 return redirect(url_for("staff_dashboard"))
             else:
                 return redirect(url_for("boss_dashboard"))
 
-        # ✅ End of checks, lete function
         return f(*args, **kwargs)
 
     return decorated_function
 
 
-# ================================
-# DATABASE SETUP FUNCTION
-# ================================
 def init_db():
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         cur = conn.cursor()
+
+        is_postgres = bool(os.getenv("DATABASE_URL"))
 
         # =====================================================
         # SUPER ADMIN
         # =====================================================
-        cur.execute("""
+        cur.execute(f"""
         CREATE TABLE IF NOT EXISTS super_admin (
             admin_id TEXT PRIMARY KEY,
             username TEXT UNIQUE NOT NULL,
             password TEXT NOT NULL,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            created_at {'TIMESTAMP' if is_postgres else 'TEXT'} DEFAULT CURRENT_TIMESTAMP
         )
         """)
-        default_admin_id = "ADMIN-" + str(uuid.uuid4())
-        cur.execute("""
-        INSERT OR IGNORE INTO super_admin 
-        (admin_id, username, password, created_at)
-        VALUES (?, ?, ?, ?)
-        """, (
-            default_admin_id,
-            "admin",
-            generate_password_hash("1234"),
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        ))
 
         # =====================================================
         # ANNOUNCEMENTS
         # =====================================================
-        cur.execute("""
+        cur.execute(f"""
         CREATE TABLE IF NOT EXISTS announcements (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {'SERIAL PRIMARY KEY' if is_postgres else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
             title TEXT NOT NULL,
             message TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at {'TIMESTAMP' if is_postgres else 'TEXT'} DEFAULT CURRENT_TIMESTAMP
         )
         """)
-        # 🔹 Safe add created_by column (if it does not exist)
+
+        # safe add created_by (SQLite style retained)
         try:
             cur.execute("ALTER TABLE announcements ADD COLUMN created_by TEXT;")
-        except sqlite3.OperationalError:
-            pass  # column already exists
+        except:
+            pass
 
         # =====================================================
         # ANNOUNCEMENT READS
         # =====================================================
-        cur.execute("""
+        cur.execute(f"""
         CREATE TABLE IF NOT EXISTS announcement_reads (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {'SERIAL PRIMARY KEY' if is_postgres else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
             announcement_id INTEGER NOT NULL,
             boss_id TEXT NOT NULL,
             is_read INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at {'TIMESTAMP' if is_postgres else 'TEXT'} DEFAULT CURRENT_TIMESTAMP
         )
         """)
 
@@ -201,7 +255,7 @@ def init_db():
         # =====================================================
         # BOSS
         # =====================================================
-        cur.execute("""
+        cur.execute(f"""
         CREATE TABLE IF NOT EXISTS boss (
             boss_id TEXT PRIMARY KEY,
             full_name TEXT NOT NULL,
@@ -210,38 +264,18 @@ def init_db():
             signup_date TEXT NOT NULL,
             trial_end_date TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'ACTIVE',
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            subscription_end_date TEXT,
+            is_online INTEGER DEFAULT 0,
+            phone TEXT,
+            email TEXT,
+            created_at {'TIMESTAMP' if is_postgres else 'TEXT'} DEFAULT CURRENT_TIMESTAMP
         )
         """)
-
-        # 🔹 SAFE ADD subscription_end_date COLUMN (HAIVURUGI CHOCHOTE)
-        try:
-            cur.execute("ALTER TABLE boss ADD COLUMN subscription_end_date TEXT;")
-        except sqlite3.OperationalError:
-            pass  # column tayari ipo
-
-        # 🔹 SAFE ADD is_online COLUMN (HAIVURUGI CHOCHOTE)
-        try:
-            cur.execute("ALTER TABLE boss ADD COLUMN is_online INTEGER DEFAULT 0;")
-        except sqlite3.OperationalError:
-            pass  # column tayari ipo
-
-        # 🆕 🔹 SAFE ADD phone COLUMN (MPYA)
-        try:
-            cur.execute("ALTER TABLE boss ADD COLUMN phone TEXT;")
-        except sqlite3.OperationalError:
-            pass  # column tayari ipo
-
-        # 🆕 🔹 SAFE ADD email COLUMN (MPYA)
-        try:
-            cur.execute("ALTER TABLE boss ADD COLUMN email TEXT;")
-        except sqlite3.OperationalError:
-            pass  # column tayari ipo
 
         # =====================================================
         # STAFF
         # =====================================================
-        cur.execute("""
+        cur.execute(f"""
         CREATE TABLE IF NOT EXISTS staff (
             staff_id TEXT PRIMARY KEY,
             boss_id TEXT NOT NULL,
@@ -250,22 +284,20 @@ def init_db():
             password TEXT NOT NULL,
             role TEXT,
             status TEXT NOT NULL DEFAULT 'ACTIVE',
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            permissions TEXT,
-            FOREIGN KEY (boss_id) REFERENCES boss(boss_id) ON DELETE CASCADE
+            created_at {'TIMESTAMP' if is_postgres else 'TEXT'} DEFAULT CURRENT_TIMESTAMP,
+            permissions TEXT
         )
         """)
 
-        # 🔹 SAFE ADD reset_required COLUMN (HAIVURUGI CHOCHOTE)
         try:
             cur.execute("ALTER TABLE staff ADD COLUMN reset_required INTEGER DEFAULT 0;")
-        except sqlite3.OperationalError:
-            pass  # column tayari ipo
+        except:
+            pass
 
         # =====================================================
         # CUSTOMERS
         # =====================================================
-        cur.execute("""
+        cur.execute(f"""
         CREATE TABLE IF NOT EXISTS customers (
             customer_id TEXT PRIMARY KEY,
             boss_id TEXT NOT NULL,
@@ -276,85 +308,79 @@ def init_db():
             meter_number TEXT,
             signup_date TEXT,
             status TEXT DEFAULT 'ACTIVE',
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (boss_id) REFERENCES boss(boss_id) ON DELETE CASCADE
+            created_at {'TIMESTAMP' if is_postgres else 'TEXT'} DEFAULT CURRENT_TIMESTAMP
         )
         """)
 
         # =====================================================
         # METERS
         # =====================================================
-        cur.execute("""
+        cur.execute(f"""
         CREATE TABLE IF NOT EXISTS meters (
             meter_id TEXT PRIMARY KEY,
             meter_number TEXT UNIQUE NOT NULL,
             customer_id TEXT NOT NULL,
             status TEXT DEFAULT 'ACTIVE',
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (customer_id) REFERENCES customers(customer_id) ON DELETE CASCADE
+            created_at {'TIMESTAMP' if is_postgres else 'TEXT'} DEFAULT CURRENT_TIMESTAMP
         )
         """)
 
         # =====================================================
         # TARIFFS
         # =====================================================
-        cur.execute("""
+        cur.execute(f"""
         CREATE TABLE IF NOT EXISTS tariffs (
             tariff_id TEXT PRIMARY KEY,
             boss_id TEXT NOT NULL,
             price_per_unit REAL NOT NULL,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (boss_id) REFERENCES boss(boss_id) ON DELETE CASCADE
+            created_at {'TIMESTAMP' if is_postgres else 'TEXT'} DEFAULT CURRENT_TIMESTAMP
         )
         """)
 
         # =====================================================
         # MASTER METER
         # =====================================================
-        cur.execute("""
+        cur.execute(f"""
         CREATE TABLE IF NOT EXISTS master_meter (
             master_id TEXT PRIMARY KEY,
             boss_id TEXT NOT NULL,
             master_number TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'ACTIVE',
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (boss_id) REFERENCES boss(boss_id) ON DELETE CASCADE
+            created_at {'TIMESTAMP' if is_postgres else 'TEXT'} DEFAULT CURRENT_TIMESTAMP
         )
         """)
 
         # =====================================================
         # MASTER METER READINGS
         # =====================================================
-        cur.execute("""
+        cur.execute(f"""
         CREATE TABLE IF NOT EXISTS master_meter_readings (
             reading_id TEXT PRIMARY KEY,
             master_id TEXT NOT NULL,
             reading_value REAL NOT NULL,
             reading_date TEXT NOT NULL,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (master_id) REFERENCES master_meter(master_id) ON DELETE CASCADE
+            created_at {'TIMESTAMP' if is_postgres else 'TEXT'} DEFAULT CURRENT_TIMESTAMP
         )
         """)
 
         # =====================================================
         # METER READINGS
         # =====================================================
-        cur.execute("""
+        cur.execute(f"""
         CREATE TABLE IF NOT EXISTS meter_readings (
             reading_id TEXT PRIMARY KEY,
             meter_id TEXT NOT NULL,
             reading_value REAL NOT NULL,
             reading_date TEXT NOT NULL,
             recorded_by TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (meter_id) REFERENCES meters(meter_id) ON DELETE CASCADE
+            created_at {'TIMESTAMP' if is_postgres else 'TEXT'} DEFAULT CURRENT_TIMESTAMP
         )
         """)
 
         # =====================================================
         # BILLS
         # =====================================================
-        cur.execute("""
+        cur.execute(f"""
         CREATE TABLE IF NOT EXISTS bills (
             bill_id TEXT PRIMARY KEY,
             customer_id TEXT NOT NULL,
@@ -367,16 +393,14 @@ def init_db():
             status TEXT DEFAULT 'UNPAID',
             payment_method TEXT,
             payment_date TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (customer_id) REFERENCES customers(customer_id) ON DELETE CASCADE,
-            FOREIGN KEY (meter_id) REFERENCES meters(meter_id) ON DELETE CASCADE
+            created_at {'TIMESTAMP' if is_postgres else 'TEXT'} DEFAULT CURRENT_TIMESTAMP
         )
         """)
 
         # =====================================================
         # PAYMENTS
         # =====================================================
-        cur.execute("""
+        cur.execute(f"""
         CREATE TABLE IF NOT EXISTS payments (
             payment_id TEXT PRIMARY KEY,
             bill_id TEXT NOT NULL,
@@ -386,17 +410,14 @@ def init_db():
             payment_method TEXT,
             reference TEXT,
             paid_at TEXT NOT NULL,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (bill_id) REFERENCES bills(bill_id) ON DELETE CASCADE,
-            FOREIGN KEY (customer_id) REFERENCES customers(customer_id) ON DELETE CASCADE,
-            FOREIGN KEY (boss_id) REFERENCES boss(boss_id) ON DELETE CASCADE
+            created_at {'TIMESTAMP' if is_postgres else 'TEXT'} DEFAULT CURRENT_TIMESTAMP
         )
         """)
 
         # =====================================================
         # RECEIPTS
         # =====================================================
-        cur.execute("""
+        cur.execute(f"""
         CREATE TABLE IF NOT EXISTS receipts (
             receipt_id TEXT PRIMARY KEY,
             payment_id TEXT NOT NULL,
@@ -405,25 +426,22 @@ def init_db():
             boss_id TEXT NOT NULL,
             amount REAL,
             issued_at TEXT NOT NULL,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             notes TEXT,
-            FOREIGN KEY (payment_id) REFERENCES payments(payment_id) ON DELETE CASCADE,
-            FOREIGN KEY (customer_id) REFERENCES customers(customer_id) ON DELETE CASCADE,
-            FOREIGN KEY (boss_id) REFERENCES boss(boss_id) ON DELETE CASCADE
+            created_at {'TIMESTAMP' if is_postgres else 'TEXT'} DEFAULT CURRENT_TIMESTAMP
         )
         """)
 
         # =====================================================
         # ACTIVITY LOGS
         # =====================================================
-        cur.execute("""
+        cur.execute(f"""
         CREATE TABLE IF NOT EXISTS activity_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {'SERIAL PRIMARY KEY' if is_postgres else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
             user_name TEXT,
             role TEXT,
             action TEXT,
             details TEXT,
-            time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            time {'TIMESTAMP' if is_postgres else 'TEXT'} DEFAULT CURRENT_TIMESTAMP,
             boss_id TEXT
         )
         """)
@@ -439,62 +457,126 @@ def init_db():
 
         conn.commit()
         conn.close()
-        print("✅ Database setup complete.")
+
+        print("✅ Database setup complete (SQLite + PostgreSQL READY).")
 
     except Exception as e:
-        print("❌ Error setting up database:", str(e))
+        print("❌ Error:", e)
         traceback.print_exc()
-        try:
-            conn.commit()
-            conn.close()
-        except:
-            pass
-
-# Run DB initialization when app starts
-init_db()
 
 
 
 # ================================
 # INIT DATABASE ROUTE (kwa testing)
 # ================================
-@app.route('/init_db')
+@app.route('/init_db', methods=['GET'])
 def init_db_route():
     try:
-        init_db()
-        return "<h3>✅ Database imeundwa kikamilifu!</h3>"
-    except Exception as e:
-        return f"<h3>❌ Tatizo limejitokeza:</h3><pre>{str(e)}</pre>"
+        # 🔒 Protection (usiweze ku-run bila admin session)
+        if "admin_id" not in session:
+            return """
+            <h3 style="color:red;">❌ Hauruhusiwi kufanya hii action</h3>
+            """
 
-# ================= ERROR HANDLER ==================
+        # 🔄 Run database initialization
+        init_db()
+
+        return """
+        <h3 style="color:green;">✅ Database imeundwa/kusasishwa kikamilifu!</h3>
+        """
+
+    except Exception as e:
+        return f"""
+        <h3 style="color:red;">❌ Tatizo limejitokeza:</h3>
+        <pre>{str(e)}</pre>
+        
+        """
+
+# 🔥 GLOBAL ERROR HANDLER (500)
+# ================================
+# Hii inakamata errors zote za server (500 Internal Server Error)
+# na kuonyesha ujumbe kulingana na mode ya app:
+# - DEBUG mode: inaonyesha full error details (kwa development)
+# - PRODUCTION mode: inaonyesha ujumbe rahisi wa user-friendly
+# ================================
 @app.errorhandler(500)
 def internal_error(e):
-    tb = traceback.format_exc()
-    return f"<h3>Internal Server Error</h3><pre>{tb}</pre>", 500
+    # 🔹 Kama app iko kwenye debug mode (development)
+    # tunaonyesha full traceback kwa ajili ya debugging
+    if app.debug:
+        tb = traceback.format_exc()
+        return f"<h3>Internal Server Error</h3><pre>{tb}</pre>", 500
 
-# ====================== MAKE SESSION TEMPORARY ======================
+    # 🔹 Production mode (live system)
+    # hatuonyeshi technical details kwa usalama
+    return "<h3>Something went wrong. Please try again later.</h3>", 500
+
+
+# 🔄 BEFORE REQUEST MIDDLEWARE
+# ================================
+# Hii inakimbia kabla ya kila request (page load yoyote)
+# Inadhibiti session behavior ya user
+#
+# 🔹 Logic:
+# - Kama user haja-login (hana boss_id au staff_id)
+#   basi session inakuwa temporary (haitadumu muda mrefu)
+# - Hii inasaidia kuongeza usalama kwa visitors wasio authenticated
+# ================================
 @app.before_request
 def make_session_temporary():
-    session.permanent = False
-
+    # 🔹 Kama hakuna login session ya boss wala staff
+    if "boss_id" not in session and "staff_id" not in session:
+        session.permanent = False
+        
+        
+        
 # =================== MULTI-ROLE DECORATOR ===================
+# ==========================================
+# 🔐 ROLE-BASED ACCESS CONTROL DECORATOR
+# ==========================================
+# Hii decorator inatumika kudhibiti access ya routes
+# kulingana na role za user (boss, staff, admin)
+#
+# Unatumika hivi:
+# @role_required("boss", "admin")
+#
+# Maana yake:
+# - Boss na Admin pekee ndio wanaruhusiwa kuingia route hiyo
+# ==========================================
 def role_required(*allowed_roles):
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
+
+            # ==========================================
+            # 🔄 ROLE → SESSION KEY MAPPING
+            # ==========================================
+            # Inabadilisha role kuwa session key yake
+            # ili kujua kama user ame-login au la
             role_session_map = {
                 "boss": "boss_id",
                 "staff": "staff_id",
-                "admin": "superadmin_id"
+                "admin": "superadmin_id"  # hakikisha inalingana na login system yako
             }
 
+            # ==========================================
+            # 🔍 CHECK ACCESS
+            # ==========================================
+            # Inapitia roles zote zinazoruhusiwa
+            # na kuangalia kama session ipo kwa role hiyo
             for role in allowed_roles:
                 session_key = role_session_map.get(role)
+
+                # Kama session ya role hiyo ipo → ruhusu access
                 if session_key and session_key in session:
                     return f(*args, **kwargs)
 
+            # ==========================================
+            # ❌ HAKUNA RUHUSA (ACCESS DENIED)
+            # ==========================================
             flash("⚠️ Huna ruhusa ku-access ukurasa huu", "danger")
-            
+
+            # Rudisha user kwenye dashboard yake kulingana na role aliyonayo
             if "superadmin_id" in session:
                 return redirect(url_for("superadmin_dashboard"))
             elif "boss_id" in session:
@@ -502,32 +584,49 @@ def role_required(*allowed_roles):
             elif "staff_id" in session:
                 return redirect(url_for("staff_dashboard"))
             else:
+                # Kama hajalogin kabisa
                 return redirect(url_for("login"))
-            
+
         return decorated_function
     return decorator
+    
+    
+    
 
-# ================= DATABASE CONNECTION ==================
-def get_db_connection():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    
+    
 
 # ================= SUPER ADMIN ROUTES ==================
+
+
 @app.route("/superadmin/login", methods=["GET", "POST"])
 def superadmin_login():
     if request.method == "POST":
         username = request.form.get("username")
         password = request.form.get("password")
 
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT * FROM super_admin WHERE username=?", (username,))
-        admin = cur.fetchone()  # sasa admin ni dict
+        # ================================
+        # DB CONNECTION
+        # ================================
+        conn, cur, db_type = get_db_connection()
+
+        # ================================
+        # QUERY (AUTO SQLITE + POSTGRES SAFE)
+        # ================================
+        db_execute(
+            cur,
+            db_type,
+            "SELECT * FROM super_admin WHERE username=%s",
+            (username,)
+        )
+
+        admin = cur.fetchone()
         conn.close()
 
+        # ================================
+        # AUTH CHECK
+        # ================================
         if admin and check_password_hash(admin["password"], password):
-            # hakikisha session key inasetiwa
             session["superadmin_id"] = admin["admin_id"]
             flash("Karibu Super Admin!", "success")
             return redirect(url_for("superadmin_dashboard"))
@@ -535,19 +634,28 @@ def superadmin_login():
         flash("Username au password si sahihi.", "danger")
 
     return render_template("superadmin_login.html")
-    
+
+
 @app.route("/superadmin/dashboard")
 def superadmin_dashboard():
+
+    # ================================
+    # 🔐 SESSION CHECK
+    # ================================
     if "superadmin_id" not in session:
         return redirect(url_for("superadmin_login"))
 
-    conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
+    # ================================
+    # 🔌 DB CONNECTION (FIXED)
+    # ================================
+    conn, cur, db_type = get_db_connection()
 
-    # 🔹 Pata list ya bosses na dynamic online status, pia phone + email
+    # ================================
+    # 🔹 BOSSES QUERY
+    # ================================
     cur.execute("""
-        SELECT boss_id, full_name, username, status, signup_date, trial_end_date, phone, email,
+        SELECT boss_id, full_name, username, status,
+               signup_date, trial_end_date, phone, email,
                CASE 
                    WHEN status IN ('TRIAL', 'ACTIVE') THEN 1
                    ELSE 0
@@ -555,94 +663,149 @@ def superadmin_dashboard():
         FROM boss
         ORDER BY full_name
     """)
-    bosses = [dict(b) for b in cur.fetchall()]
 
-    # 🔹 Hesabu idadi ya bosses online sasa hivi
+    bosses = [dict(row) for row in cur.fetchall()]
+
+    # ================================
+    # 🔹 ONLINE COUNT
+    # ================================
     online_count = sum(1 for b in bosses if b['is_online'] == 1)
 
-    # 🔹 Calculate days passed, days left kwa TRIAL bosses
+    # ================================
+    # 🔹 DATE CALCULATION
+    # ================================
     today = datetime.now().date()
     boss_list = []
 
     for b in bosses:
-        # Safely parse dates
+
         try:
-            signup = datetime.strptime(b['signup_date'], "%Y-%m-%d %H:%M:%S").date()
-        except Exception:
+            signup = datetime.strptime(str(b['signup_date']), "%Y-%m-%d %H:%M:%S").date()
+        except:
             signup = today
 
         try:
-            trial_end = datetime.strptime(b['trial_end_date'], "%Y-%m-%d %H:%M:%S").date()
-        except Exception:
+            trial_end = datetime.strptime(str(b['trial_end_date']), "%Y-%m-%d %H:%M:%S").date()
+        except:
             trial_end = today
 
         days_passed = (today - signup).days
         days_left = (trial_end - today).days
 
         boss_list.append({
-            'boss_id': b['boss_id'],
-            'full_name': b['full_name'],
-            'username': b['username'],
-            'status': b['status'],
-            'signup_date': b['signup_date'],
-            'trial_end_date': b['trial_end_date'],
-            'days_passed': days_passed,
-            'days_left': max(days_left, 0),
-            'is_expired': today > trial_end,
-            'is_online': b['is_online'] == 1,  # ✅ TRIAL/ACTIVE bosses online
-            'phone': b.get('phone', ''),       # 🔹 Add phone
-            'email': b.get('email', '')        # 🔹 Add email
+            "boss_id": b["boss_id"],
+            "full_name": b["full_name"],
+            "username": b["username"],
+            "status": b["status"],
+            "signup_date": b["signup_date"],
+            "trial_end_date": b["trial_end_date"],
+            "days_passed": days_passed,
+            "days_left": max(days_left, 0),
+            "is_expired": today > trial_end,
+            "is_online": bool(b["is_online"]),
+            "phone": b.get("phone") or "",
+            "email": b.get("email") or ""
         })
 
     conn.close()
-    return render_template("superadmin_dashboard.html", bosses=boss_list, online_count=online_count)
-    
+
+    return render_template(
+        "superadmin_dashboard.html",
+        bosses=boss_list,
+        online_count=online_count
+    )
+
 
 
 @app.route("/superadmin/search_boss", methods=["GET"])
 def search_boss():
+
     query = request.args.get("query") or ""
-    conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
 
-    # 🔹 Search in multiple columns: full_name, username, phone, email
-    cur.execute("""
-        SELECT * FROM boss
-        WHERE full_name LIKE ?
-           OR username LIKE ?
-           OR phone LIKE ?
-           OR email LIKE ?
-        ORDER BY full_name
-    """, ('%' + query + '%', '%' + query + '%', '%' + query + '%', '%' + query + '%'))
+    # ================================
+    # 🔹 DB CONNECTION (FIXED)
+    # ================================
+    conn, cur, db_type = get_db_connection()
 
-    bosses = [dict(b) for b in cur.fetchall()]
+    # ================================
+    # 🔹 SEARCH PARAM
+    # ================================
+    search_param = f"%{query}%"
+
+    # ================================
+    # 🔹 DB COMPATIBLE SEARCH QUERY
+    # ================================
+    if os.getenv("DATABASE_URL"):
+        cur.execute("""
+            SELECT * FROM boss
+            WHERE full_name ILIKE %s
+               OR username ILIKE %s
+               OR phone ILIKE %s
+               OR email ILIKE %s
+            ORDER BY full_name
+        """, (search_param, search_param, search_param, search_param))
+    else:
+        cur.execute("""
+            SELECT * FROM boss
+            WHERE full_name LIKE ?
+               OR username LIKE ?
+               OR phone LIKE ?
+               OR email LIKE ?
+            ORDER BY full_name
+        """, (search_param, search_param, search_param, search_param))
+
+    bosses = [dict(row) for row in cur.fetchall()]
     conn.close()
-    return render_template("search_boss.html", results=bosses, query=query)
+
+    return render_template(
+        "search_boss.html",
+        results=bosses,
+        query=query
+    )
 
 
 
-from flask import jsonify
+
 
 @app.route("/superadmin/online_count")
 def online_count_api():
-    if "superadmin_id" not in session:
-        return jsonify({"online_count": 0})  # kama si logged in, return 0
 
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM boss WHERE is_online = 1")
-    count = cur.fetchone()[0] or 0
+    # ================================
+    # 🔐 SESSION CHECK
+    # ================================
+    if "superadmin_id" not in session:
+        return jsonify({"online_count": 0})
+
+    # ================================
+    # 🔌 DB CONNECTION (FIXED)
+    # ================================
+    conn, cur, db_type = get_db_connection()
+
+    # ================================
+    # 🔹 SAFE QUERY (SQLite + PostgreSQL)
+    # ================================
+    cur.execute("""
+        SELECT COUNT(*) 
+        FROM boss 
+        WHERE is_online = 1
+    """)
+
+    result = cur.fetchone()
+    count = result[0] if result else 0
+
     cur.close()
     conn.close()
 
     return jsonify({"online_count": count})
-    
+
         
                 
 @app.route("/super_admin/announcement", methods=["GET", "POST"])
 def create_announcement():
-    # 🔹 Session key inafanana na login
+
+    # ================================
+    # 🔐 SESSION CHECK
+    # ================================
     if "superadmin_id" not in session:
         flash("Ingia kama super admin kwanza", "danger")
         return redirect(url_for("superadmin_login"))
@@ -654,10 +817,19 @@ def create_announcement():
         conn = get_db_connection()
         cur = conn.cursor()
 
-        cur.execute("""
-            INSERT INTO announcements (title, message, created_by)
-            VALUES (?, ?, ?)
-        """, (title, message, session["superadmin_id"]))
+        # ================================
+        # 🔹 DB SAFE INSERT QUERY
+        # ================================
+        if os.getenv("DATABASE_URL"):
+            cur.execute("""
+                INSERT INTO announcements (title, message, created_by)
+                VALUES (%s, %s, %s)
+            """, (title, message, session["superadmin_id"]))
+        else:
+            cur.execute("""
+                INSERT INTO announcements (title, message, created_by)
+                VALUES (?, ?, ?)
+            """, (title, message, session["superadmin_id"]))
 
         conn.commit()
         conn.close()
@@ -668,10 +840,12 @@ def create_announcement():
     return render_template("create_announcement.html")
     
     
-    
 @app.route("/superadmin/boss/<boss_id>/customers")
 def superadmin_boss_customers(boss_id):
-    # 🔒 Hakikisha superadmin ame-login
+
+    # ================================
+    # 🔒 SESSION CHECK
+    # ================================
     if "superadmin_id" not in session:
         flash("Unauthorized access", "danger")
         return redirect(url_for("superadmin_login"))
@@ -679,27 +853,51 @@ def superadmin_boss_customers(boss_id):
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Pata maboss (optional, kwa dropdown au reference)
+    # ================================
+    # 🔹 GET BOSSES (dropdown)
+    # ================================
     cur.execute("SELECT boss_id, full_name, username FROM boss ORDER BY full_name")
     bosses = cur.fetchall()
 
-    # Pata customers wa boss huyu moja kwa moja
-    cur.execute("""
-        SELECT 
-            c.customer_id,
-            c.full_name,
-            c.phone,
-            c.area,
-            c.house_number,
-            c.status,
-            GROUP_CONCAT(m.meter_number) AS meters
-        FROM customers c
-        LEFT JOIN meters m ON c.customer_id = m.customer_id
-        WHERE c.boss_id = ?
-        GROUP BY c.customer_id
-        ORDER BY c.full_name
-    """, (boss_id,))
-    customers = cur.fetchall()
+    # ================================
+    # 🔹 DB-SAFE QUERY (IMPORTANT PART)
+    # ================================
+    if os.getenv("DATABASE_URL"):
+        # 🔵 PostgreSQL
+        cur.execute("""
+            SELECT 
+                c.customer_id,
+                c.full_name,
+                c.phone,
+                c.area,
+                c.house_number,
+                c.status,
+                STRING_AGG(m.meter_number, ', ') AS meters
+            FROM customers c
+            LEFT JOIN meters m ON c.customer_id = m.customer_id
+            WHERE c.boss_id = %s
+            GROUP BY c.customer_id
+            ORDER BY c.full_name
+        """, (boss_id,))
+    else:
+        # 🟡 SQLite
+        cur.execute("""
+            SELECT 
+                c.customer_id,
+                c.full_name,
+                c.phone,
+                c.area,
+                c.house_number,
+                c.status,
+                GROUP_CONCAT(m.meter_number) AS meters
+            FROM customers c
+            LEFT JOIN meters m ON c.customer_id = m.customer_id
+            WHERE c.boss_id = ?
+            GROUP BY c.customer_id
+            ORDER BY c.full_name
+        """, (boss_id,))
+
+    customers = [dict(row) for row in cur.fetchall()]
 
     conn.close()
 
@@ -710,94 +908,116 @@ def superadmin_boss_customers(boss_id):
         customers=customers
     )
     
-
-
-def check_subscription(boss_id):
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    cur.execute("SELECT subscription_end_date FROM boss WHERE boss_id = ?", (boss_id,))
-    boss = cur.fetchone()
-
-    conn.close()
-
-    if boss:
-        sub_end_str = boss["subscription_end_date"]
-        if not sub_end_str:
-            # Hakuna subscription imewekwa → acha kuendelea, au weka False
-            return False
-
-        try:
-            end_date = datetime.strptime(sub_end_str, "%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            # Ikiwa date iko mbovu au haiko sawa format
-            return False
-
-        if datetime.now() > end_date:
-            return False  # muda umeisha
-
-    else:
-        return False  # boss haipo
-
-    return True
-    
-    
   
-
-
 @app.route("/superadmin/customer/<customer_id>/meters")
 def superadmin_customer_meters(customer_id):
-    # Hakikisha superadmin ame-login
+
+    # 🔒 Hakikisha superadmin ame-login
     if "superadmin_id" not in session:
         return redirect(url_for("superadmin_login"))
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Pata customer info pamoja na boss_id
-    cur.execute("SELECT full_name, boss_id FROM customers WHERE customer_id = ?", (customer_id,))
+    # ================================
+    # 🔹 GET CUSTOMER INFO (DB SAFE)
+    # ================================
+    if os.getenv("DATABASE_URL"):
+        cur.execute(
+            "SELECT full_name, boss_id FROM customers WHERE customer_id = %s",
+            (customer_id,)
+        )
+    else:
+        cur.execute(
+            "SELECT full_name, boss_id FROM customers WHERE customer_id = ?",
+            (customer_id,)
+        )
+
     customer = cur.fetchone()
 
-    # Pata meters zote za customer huyu
-    cur.execute("""
-        SELECT meter_number, status, created_at
-        FROM meters
-        WHERE customer_id = ?
-        ORDER BY meter_id DESC
-    """, (customer_id,))
-    meters = cur.fetchall()
+    # ================================
+    # 🔹 GET CUSTOMER METERS (DB SAFE)
+    # ================================
+    if os.getenv("DATABASE_URL"):
+        cur.execute("""
+            SELECT meter_number, status, created_at
+            FROM meters
+            WHERE customer_id = %s
+            ORDER BY meter_id DESC
+        """, (customer_id,))
+    else:
+        cur.execute("""
+            SELECT meter_number, status, created_at
+            FROM meters
+            WHERE customer_id = ?
+            ORDER BY meter_id DESC
+        """, (customer_id,))
+
+    meters = [dict(row) for row in cur.fetchall()]
 
     conn.close()
 
-    # Pass boss_id kwenye template ili Back button ifanye kazi
+    # ================================
+    # 🔹 SAFETY CHECK (customer asipokuwepo)
+    # ================================
+    if not customer:
+        flash("Customer hakupatikana", "danger")
+        return redirect(url_for("superadmin_dashboard"))
+
+    # ================================
+    # 🔹 RETURN TEMPLATE
+    # ================================
     return render_template(
         "superadmin_customer_meters.html",
-        customer=customer,
+        customer=dict(customer),
         meters=meters,
-        boss_id=customer['boss_id']
+        boss_id=customer["boss_id"]
     )
+
+
+# =========================================================
+
 
 @app.route("/superadmin/boss/new")
 def new_bosses():
-    conn = sqlite3.connect("water_supply.db")
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
-    
-    # Chagua bosses wote
-    cur.execute("SELECT * FROM boss ORDER BY signup_date ASC")
-    bosses = cur.fetchall()
 
-    today = datetime.now().date()  # Tumia date tu
+    # 🔒 (optional) unaweza kuongeza login check kama unataka consistency
+    if "superadmin_id" not in session:
+        return redirect(url_for("superadmin_login"))
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # ================================
+    # 🔹 GET BOSSES
+    # ================================
+    cur.execute("SELECT * FROM boss ORDER BY signup_date ASC")
+    bosses = [dict(row) for row in cur.fetchall()]
+
+    today = datetime.now().date()
     boss_list = []
 
     for b in bosses:
-        signup = datetime.strptime(b['signup_date'], "%Y-%m-%d %H:%M:%S").date()
-        trial_end = datetime.strptime(b['trial_end_date'], "%Y-%m-%d %H:%M:%S").date()
+
+        # ================================
+        # 🔹 SAFE DATE PARSING
+        # ================================
+        try:
+            signup = datetime.strptime(str(b['signup_date']), "%Y-%m-%d %H:%M:%S").date()
+        except:
+            signup = today
+
+        try:
+            trial_end = datetime.strptime(str(b['trial_end_date']), "%Y-%m-%d %H:%M:%S").date()
+        except:
+            trial_end = today
 
         days_passed = (today - signup).days
         days_left = (trial_end - today).days
 
-        # Live status calculation
+        # ================================
+        # 🔹 LIVE STATUS LOGIC
+        # ================================
         if b['status'] == "RESET_PENDING":
             status = "RESET_PENDING"
         elif today > trial_end:
@@ -819,13 +1039,16 @@ def new_bosses():
         })
 
     conn.close()
+
     return render_template("boss_wapya.html", bosses=boss_list)
-    
+
     
 
 
 @app.route("/superadmin/boss/<boss_id>/trigger_reset", methods=["POST"])
 def superadmin_trigger_boss_reset(boss_id):
+
+    # 🔒 Hakikisha superadmin ame-login
     if "superadmin_id" not in session:
         flash("Unauthorized access", "danger")
         return redirect(url_for("superadmin_login"))
@@ -836,9 +1059,16 @@ def superadmin_trigger_boss_reset(boss_id):
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # 🔹 Hifadhi status ya sasa kabla ya kubadilisha password
-    cur.execute("SELECT status FROM boss WHERE boss_id=?", (boss_id,))
+    # ================================
+    # 🔹 GET CURRENT STATUS (DB SAFE)
+    # ================================
+    if os.getenv("DATABASE_URL"):
+        cur.execute("SELECT status FROM boss WHERE boss_id=%s", (boss_id,))
+    else:
+        cur.execute("SELECT status FROM boss WHERE boss_id=?", (boss_id,))
+
     boss = cur.fetchone()
+
     if not boss:
         conn.close()
         flash("Boss haipo", "danger")
@@ -846,59 +1076,107 @@ def superadmin_trigger_boss_reset(boss_id):
 
     current_status = boss["status"]
 
-    # 🔹 Badilisha password tu, status ibaki ile ile
-    cur.execute(
-        "UPDATE boss SET password=?, status=? WHERE boss_id=?",
-        (hashed, current_status, boss_id)
-    )
+    # ================================
+    # 🔹 UPDATE PASSWORD (DB SAFE)
+    # ================================
+    if os.getenv("DATABASE_URL"):
+        cur.execute(
+            "UPDATE boss SET password=%s, status=%s WHERE boss_id=%s",
+            (hashed, current_status, boss_id)
+        )
+    else:
+        cur.execute(
+            "UPDATE boss SET password=?, status=? WHERE boss_id=?",
+            (hashed, current_status, boss_id)
+        )
+
     conn.commit()
     conn.close()
 
     flash(f"Boss ameombwa kuweka PIN mpya. Temporary password ni: {temp_password}", "info")
-    return redirect(url_for("superadmin_dashboard"))    
 
-
-
+    return redirect(url_for("superadmin_dashboard"))
 
 
 @app.route("/superadmin/boss/<boss_id>/toggle")
 def toggle_boss(boss_id):
-    conn = get_db_connection()
-    cur = conn.cursor()
+
+    conn, cur, db_type = get_db_connection()
     now = datetime.now()
 
-    # Get current status
-    cur.execute("SELECT status FROM boss WHERE boss_id=?", (boss_id,))
+    # ================================
+    # 🔹 GET CURRENT STATUS (DB SAFE)
+    # ================================
+    if os.getenv("DATABASE_URL"):
+        cur.execute("SELECT status FROM boss WHERE boss_id=%s", (boss_id,))
+    else:
+        cur.execute("SELECT status FROM boss WHERE boss_id=?", (boss_id,))
+
     boss = cur.fetchone()
 
     if not boss:
+        conn.close()
         flash("Boss haipo", "danger")
         return redirect(url_for("superadmin_dashboard"))
 
-    # Toggle logic
+    # ================================
+    # 🔹 TOGGLE LOGIC
+    # ================================
     if boss["status"] == "ACTIVE":
-        # Disable boss
-        cur.execute("UPDATE boss SET status='INACTIVE', subscription_end_date=NULL WHERE boss_id=?", (boss_id,))
+
+        # 🔻 Disable boss
+        if os.getenv("DATABASE_URL"):
+            cur.execute(
+                "UPDATE boss SET status=%s, subscription_end_date=NULL WHERE boss_id=%s",
+                ("INACTIVE", boss_id)
+            )
+        else:
+            cur.execute(
+                "UPDATE boss SET status=?, subscription_end_date=NULL WHERE boss_id=?",
+                ("INACTIVE", boss_id)
+            )
+
     else:
-        # Enable boss and set subscription_end_date
+
+        # 🔺 Enable boss
         subscription_end = now + timedelta(minutes=20)  # testing duration
-        cur.execute("""
-            UPDATE boss
-            SET status='ACTIVE', subscription_end_date=?
-            WHERE boss_id=?
-        """, (subscription_end.strftime("%Y-%m-%d %H:%M:%S"), boss_id))
+        formatted_date = subscription_end.strftime("%Y-%m-%d %H:%M:%S")
+
+        if os.getenv("DATABASE_URL"):
+            cur.execute("""
+                UPDATE boss
+                SET status=%s, subscription_end_date=%s
+                WHERE boss_id=%s
+            """, ("ACTIVE", formatted_date, boss_id))
+        else:
+            cur.execute("""
+                UPDATE boss
+                SET status=?, subscription_end_date=?
+                WHERE boss_id=?
+            """, ("ACTIVE", formatted_date, boss_id))
 
     conn.commit()
     conn.close()
+
     flash("Boss status updated.", "success")
     return redirect(url_for("superadmin_dashboard"))
-    
-      
+
+
 @app.route("/superadmin/logout")
 def superadmin_logout():
+
+    # 🔹 Ondoa session ya superadmin
     session.pop("superadmin_id", None)
+
+    # 🔹 (Optional but recommended) futa session zote
+    # session.clear()
+
     flash("Umetoka kwenye mfumo", "info")
-    return redirect(url_for("superadmin_login"))    
+
+    return redirect(url_for("superadmin_login"))      
+      
+      
+
     
                 
 # =============================
@@ -909,22 +1187,22 @@ from functools import wraps
 # Hii function ita-apply decorator kwa routes zote zinazoanza na "boss_"
 def apply_access_decorator(app, decorator):
     for rule in app.url_map.iter_rules():
-        if rule.endpoint.startswith("boss_"):
+
+        if rule.endpoint.startswith("boss_") and rule.endpoint not in ["boss_login"]:
+
             view_func = app.view_functions[rule.endpoint]
             app.view_functions[rule.endpoint] = decorator(view_func)
-
-# ⚠️ Hakikisha hii inaitwa BAADA ya routes zote ku-define
-apply_access_decorator(app, check_access)
-
+            
 
 @app.route("/boss/signup", methods=["GET", "POST"])
 def boss_signup():
+
     if request.method == "POST":
         full_name = request.form.get("full_name")
         username = request.form.get("username")
         password = request.form.get("password")
 
-        # 🆕 GET PHONE & EMAIL
+        # 🆕 PHONE & EMAIL
         phone = request.form.get("phone")
         email = request.form.get("email")
 
@@ -934,46 +1212,81 @@ def boss_signup():
         now = datetime.now()
 
         signup_date = now.strftime("%Y-%m-%d %H:%M:%S")
-        # ✅ Trial ya dakika 2 kwa testing
         trial_end_date = (now + timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M:%S")
 
-        # ✅ Status ya TRIAL
         status = "TRIAL"
 
-        conn = get_db_connection()
-        cur = conn.cursor()
+        conn, cur, db_type = get_db_connection()
 
         try:
-            # 🆕 CHECK DUPLICATE EMAIL / PHONE
-            cur.execute("SELECT * FROM boss WHERE email = ? OR phone = ?", (email, phone))
+            # ================================
+            # 🔹 CHECK DUPLICATE (DB SAFE)
+            # ================================
+            if os.getenv("DATABASE_URL"):
+                cur.execute(
+                    "SELECT * FROM boss WHERE email=%s OR phone=%s",
+                    (email, phone)
+                )
+            else:
+                cur.execute(
+                    "SELECT * FROM boss WHERE email=? OR phone=?",
+                    (email, phone)
+                )
+
             existing = cur.fetchone()
+
             if existing:
                 flash("Email au namba ya simu tayari imetumika.", "danger")
+                conn.close()
                 return redirect(url_for("boss_signup"))
 
-            cur.execute("""
-                INSERT INTO boss (
-                    boss_id, full_name, username, password,
-                    signup_date, trial_end_date, status, is_online, created_at,
+            # ================================
+            # 🔹 INSERT BOSS (DB SAFE)
+            # ================================
+            if os.getenv("DATABASE_URL"):
+                cur.execute("""
+                    INSERT INTO boss (
+                        boss_id, full_name, username, password,
+                        signup_date, trial_end_date, status, is_online, created_at,
+                        phone, email
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    boss_id, full_name, username, hashed_pw,
+                    signup_date, trial_end_date, status, 1, signup_date,
                     phone, email
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                boss_id, full_name, username, hashed_pw,
-                signup_date, trial_end_date, status, 1, signup_date,  # ✅ is_online=1
-                phone, email
-            ))
+                ))
+            else:
+                cur.execute("""
+                    INSERT INTO boss (
+                        boss_id, full_name, username, password,
+                        signup_date, trial_end_date, status, is_online, created_at,
+                        phone, email
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    boss_id, full_name, username, hashed_pw,
+                    signup_date, trial_end_date, status, 1, signup_date,
+                    phone, email
+                ))
 
             conn.commit()
 
-            # 🔹 Initialize session (boss mpya ana online)
+            # ================================
+            # 🔹 SESSION START
+            # ================================
             session['just_signed_up'] = True
             session['boss_id'] = boss_id
 
             return redirect(url_for("boss_dashboard"))
 
-        except sqlite3.IntegrityError:
-            flash("Username tayari ipo.", "danger")
+        except Exception as e:
+            # 🔹 HANDLE BOTH SQLITE + POSTGRESQL ERRORS
+            if "UNIQUE constraint" in str(e) or "duplicate key" in str(e):
+                flash("Username tayari ipo.", "danger")
+            else:
+                flash("Kuna tatizo limetokea.", "danger")
+                print("Signup error:", e)
 
         finally:
             conn.close()
@@ -985,27 +1298,31 @@ def boss_signup():
 def boss_login():
     """
     🔹 Boss Login Route
-    Hii route inashughulikia:
-    1️⃣ Login ya boss wa system
-    2️⃣ Auto-check na update ya TRIAL na subscription expiry (soft restriction)
-    3️⃣ Block account ikiwa imefungwa manually (INACTIVE)
-    4️⃣ Handle RESET_PENDING temporary passwords
-    5️⃣ Initialize session na announcements
-    6️⃣ Update is_online status
-    7️⃣ Provide user-friendly messages
     """
+
     if request.method == "POST":
         username = request.form.get("username")
         password = request.form.get("password")
 
         # ===============================
-        # 🔹 Database connection
+        # 🔹 Database connection (FIXED ONLY)
         # ===============================
-        conn = get_db_connection()
-        cur = conn.cursor()
+        conn, cur, db_type = get_db_connection()
 
-        # 🔹 Fetch boss by username
-        cur.execute("SELECT * FROM boss WHERE username=?", (username,))
+        # ===============================
+        # 🔹 DB COMPATIBLE QUERY
+        # ===============================
+        if os.getenv("DATABASE_URL"):
+            cur.execute(
+                "SELECT * FROM boss WHERE username=%s",
+                (username,)
+            )
+        else:
+            cur.execute(
+                "SELECT * FROM boss WHERE username=?",
+                (username,)
+            )
+
         boss = cur.fetchone()
 
         if not boss:
@@ -1043,62 +1360,80 @@ def boss_login():
             return redirect(url_for("boss_login"))
 
         # ===============================
-        # 🔹 PARSE TRIAL & SUBSCRIPTION DATES SAFELY
+        # 🔹 PARSE DATES SAFELY
         # ===============================
         trial_end = boss.get("trial_end_date")
         sub_end = boss.get("subscription_end_date")
+
         try:
             if trial_end and isinstance(trial_end, str):
                 trial_end = datetime.strptime(trial_end, "%Y-%m-%d %H:%M:%S")
-        except Exception:
+        except:
             trial_end = None
 
         try:
             if sub_end and isinstance(sub_end, str):
                 sub_end = datetime.strptime(sub_end, "%Y-%m-%d %H:%M:%S")
-        except Exception:
+        except:
             sub_end = None
 
         # ===============================
-        # 🔹 SOFT RESTRICTION AFTER TRIAL OR SUBSCRIPTION EXPIRE
+        # 🔹 SOFT RESTRICTION LOGIC
         # ===============================
-        restricted = False  # temporary flag
+        restricted = False
 
         if boss["status"] == "TRIAL" and trial_end and now > trial_end:
             restricted = True
             boss["status"] = "TRIAL_EXPIRE"
-            cur.execute(
-                "UPDATE boss SET status=? WHERE boss_id=?",
-                ("TRIAL_EXPIRE", boss["boss_id"])
-            )
+
+            if os.getenv("DATABASE_URL"):
+                cur.execute(
+                    "UPDATE boss SET status=%s WHERE boss_id=%s",
+                    ("TRIAL_EXPIRE", boss["boss_id"])
+                )
+            else:
+                cur.execute(
+                    "UPDATE boss SET status=? WHERE boss_id=?",
+                    ("TRIAL_EXPIRE", boss["boss_id"])
+                )
+
             conn.commit()
-            flash(
-                "⚠️ Trial imeisha: Huwezi kusoma meter au kupokea malipo. Unaweza kuendelea kuona dashboard.",
-                "warning"
-            )
+
         elif boss["status"] == "ACTIVE" and sub_end and now > sub_end:
             restricted = True
             boss["status"] = "SUBSCRIPTION_EXPIRE"
-            cur.execute(
-                "UPDATE boss SET status=? WHERE boss_id=?",
-                ("SUBSCRIPTION_EXPIRE", boss["boss_id"])
-            )
+
+            if os.getenv("DATABASE_URL"):
+                cur.execute(
+                    "UPDATE boss SET status=%s WHERE boss_id=%s",
+                    ("SUBSCRIPTION_EXPIRE", boss["boss_id"])
+                )
+            else:
+                cur.execute(
+                    "UPDATE boss SET status=? WHERE boss_id=?",
+                    ("SUBSCRIPTION_EXPIRE", boss["boss_id"])
+                )
+
             conn.commit()
-            flash(
-                "⚠️ Subscription yako imeisha: Huwezi kusoma meter au kupokea malipo. Tafadhali wasiliana na Masoud (0745906763) ili kufanya malipo.",
-                "warning"
-            )
 
         # ===============================
-        # 🔹 BLOCK LOGIN IF MANUALLY INACTIVE
+        # 🔹 BLOCK IF INACTIVE
         # ===============================
         if boss["status"] == "INACTIVE":
-            cur.execute(
-                "UPDATE boss SET is_online=0 WHERE boss_id=?",
-                (boss["boss_id"],)
-            )
+            if os.getenv("DATABASE_URL"):
+                cur.execute(
+                    "UPDATE boss SET is_online=0 WHERE boss_id=%s",
+                    (boss["boss_id"],)
+                )
+            else:
+                cur.execute(
+                    "UPDATE boss SET is_online=0 WHERE boss_id=?",
+                    (boss["boss_id"],)
+                )
+
             conn.commit()
             conn.close()
+
             flash(
                 "Huduma zimesitishwa kwa sasa. Tafadhali wasiliana na support kwa msaada zaidi (ph. 0744906763).",
                 "danger"
@@ -1106,32 +1441,41 @@ def boss_login():
             return redirect(url_for("boss_login"))
 
         # ===============================
-        # 🔹 INITIALIZE SESSION
+        # 🔹 SESSION INIT
         # ===============================
         session.clear()
         session["boss_id"] = boss["boss_id"]
         session["boss_status"] = boss["status"]
         session["boss_name"] = boss["full_name"]
-        session["restricted"] = restricted  # hii itabakia bila kufutwa
+        session["restricted"] = restricted
 
         # ===============================
         # 🔹 UPDATE ONLINE STATUS
         # ===============================
-        if boss["status"] in ["TRIAL", "ACTIVE", "TRIAL_EXPIRE", "SUBSCRIPTION_EXPIRE"]:
-            cur.execute("UPDATE boss SET is_online=1 WHERE boss_id=?", (boss["boss_id"],))
+        if os.getenv("DATABASE_URL"):
+            cur.execute(
+                "UPDATE boss SET is_online=1 WHERE boss_id=%s",
+                (boss["boss_id"],)
+            )
         else:
-            cur.execute("UPDATE boss SET is_online=0 WHERE boss_id=?", (boss["boss_id"],))
+            cur.execute(
+                "UPDATE boss SET is_online=1 WHERE boss_id=?",
+                (boss["boss_id"],)
+            )
+
         conn.commit()
 
         # ===============================
-        # 🔹 FETCH LATEST ANNOUNCEMENT
+        # 🔹 LATEST ANNOUNCEMENT
         # ===============================
         cur.execute("""
             SELECT * FROM announcements
             ORDER BY created_at DESC
             LIMIT 1
         """)
+
         announcement = cur.fetchone()
+
         if announcement:
             session["announcement_title"] = announcement["title"]
             session["announcement_message"] = announcement["message"]
@@ -1142,28 +1486,28 @@ def boss_login():
         conn.close()
 
         # ===============================
-        # 🔹 SUCCESS MESSAGE BASED ON STATUS
+        # 🔹 SUCCESS MESSAGES
         # ===============================
         if boss["status"] == "TRIAL":
             flash(
-                "Karibu ! umeanza kutumia mfumo. Mara baada ya kutumia mfumo huu tafadhali tupatie maoni yako ili tuendelee kuboresha huduma zetu (ph.0744906763).",
+                "Karibu! umeanza kutumia mfumo. Tafadhali tupe feedback ili kuboresha huduma.",
                 "info"
             )
         elif boss["status"] == "ACTIVE":
-            flash(f"Karibu tena, {boss['full_name']}! Tuna furaha kukuona hapa.", "success")
-        elif boss["status"] in ["TRIAL_EXPIRE", "SUBSCRIPTION_EXPIRE"]:
+            flash(f"Karibu tena, {boss['full_name']}!", "success")
+        else:
             flash(
-                f"Karibu tena, {boss['full_name']}! Mfumo una restrictions kutokana na subscription. Hivyo kuna huduma kadhaa zimesitishwa  mpaka utakapo changia  kwa mawasiliano  piga : (0744906763 )  iliuweze kuchangia   ftom - Masoud.",
+                "Karibu tena! Mfumo una baadhi ya restrictions kulingana na subscription yako.",
                 "warning"
             )
 
         return redirect(url_for("boss_dashboard"))
 
     return render_template("boss_login.html")
+    
 
 
-    
-    
+#------route inayo mpa boss matangazo_______
 @app.route("/boss/announcements")
 def boss_announcements():
     if "boss_id" not in session:
@@ -1173,100 +1517,148 @@ def boss_announcements():
     boss_id = session["boss_id"]
 
     conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 
-    # Pata signup_date sahihi ya boss
-    cur.execute("SELECT signup_date FROM boss WHERE boss_id = ?", (boss_id,))
+    # ===============================
+    # 🔹 GET BOSS SIGNUP DATE
+    # ===============================
+    if os.getenv("DATABASE_URL"):
+        cur.execute(
+            "SELECT signup_date FROM boss WHERE boss_id=%s",
+            (boss_id,)
+        )
+    else:
+        cur.execute(
+            "SELECT signup_date FROM boss WHERE boss_id=?",
+            (boss_id,)
+        )
+
     boss = cur.fetchone()
 
     if not boss:
+        conn.close()
         flash("Boss hakupatikani", "danger")
         return redirect(url_for("boss_dashboard"))
 
     boss_signup_date = boss["signup_date"]
 
-    # Ensure format ya datetime SQLite
+    # ===============================
+    # 🔹 SAFE DATE PARSING
+    # ===============================
     from datetime import datetime
+
     try:
-        dt = datetime.strptime(boss_signup_date, "%Y-%m-%d %H:%M:%S")
-        boss_signup_date = dt.strftime("%Y-%m-%d %H:%M:%S")
-    except ValueError:
-        # kama signup_date haiko sahihi, tumia datetime sasa
+        if isinstance(boss_signup_date, str):
+            dt = datetime.strptime(boss_signup_date, "%Y-%m-%d %H:%M:%S")
+            boss_signup_date = dt.strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
         boss_signup_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # Chukua matangazo mapya tu baada ya signup ya boss
-    cur.execute("""
-        SELECT *
-        FROM announcements
-        WHERE datetime(created_at) >= datetime(?)
-        ORDER BY created_at DESC
-    """, (boss_signup_date,))
+    # ===============================
+    # 🔹 FETCH ANNOUNCEMENTS AFTER SIGNUP
+    # ===============================
+    if os.getenv("DATABASE_URL"):
+        cur.execute("""
+            SELECT *
+            FROM announcements
+            WHERE created_at >= %s
+            ORDER BY created_at DESC
+        """, (boss_signup_date,))
+    else:
+        cur.execute("""
+            SELECT *
+            FROM announcements
+            WHERE datetime(created_at) >= datetime(?)
+            ORDER BY created_at DESC
+        """, (boss_signup_date,))
 
     announcements = cur.fetchall()
     conn.close()
 
-    return render_template("boss_announcements.html", announcements=announcements)
+    return render_template(
+        "boss_announcements.html",
+        announcements=announcements
+    )    
     
-    
-    
-# ==============================
-# Route ya kulipa subscription ya boss
-# ==============================
-
 
 @app.route("/boss/set_new_pin", methods=["GET", "POST"])
 def boss_set_new_pin():
-    # 🔐 Hakikisha boss ameingia kwenye session, vinginevyo rudisha kwenye login
+    """
+    🔐 Boss Set New PIN Route
+    Hii route inaruhusu boss kuweka PIN mpya baada ya:
+    - RESET_PENDING login
+    - Forgot password flow
+    """
+
+    # ===============================
+    # 🔐 SESSION CHECK
+    # ===============================
     if "boss_id" not in session:
         flash("Login kwanza.", "danger")
         return redirect(url_for("boss_login"))
 
     boss_id = session["boss_id"]
 
-    # 📝 Angalia kama form imesubmit POST method
+    # ===============================
+    # 🔽 POST REQUEST (FORM SUBMIT)
+    # ===============================
     if request.method == "POST":
         new_pin = request.form.get("new_pin")
         confirm_pin = request.form.get("confirm_pin")
 
-        # ⚠️ Kagua kama zote PIN zimejazwa
+        # ===============================
+        # ⚠️ VALIDATION
+        # ===============================
         if not new_pin or not confirm_pin:
             flash("Tafadhali jaza PIN zote mbili.", "warning")
-        # ⚠️ Kagua kama PIN mpya na uthibitisho wa PIN vinafanana
-        elif new_pin != confirm_pin:
+            return redirect(url_for("boss_set_new_pin"))
+
+        if new_pin != confirm_pin:
             flash("PIN mpya na uthibitisho havilingani.", "warning")
-        else:
-            # 🔒 Hash PIN mpya kwa usalama kabla ya kuweka database
-            hashed = generate_password_hash(new_pin)
+            return redirect(url_for("boss_set_new_pin"))
 
-            # 🔌 Fungua connection ya database
-            conn = get_db_connection()
-            cur = conn.cursor()
+        # ===============================
+        # 🔒 HASH PIN
+        # ===============================
+        hashed = generate_password_hash(new_pin)
 
-            # 💾 Update password na status ya boss kuwa ACTIVE
+        # ===============================
+        # 🔌 DATABASE UPDATE (DB SAFE)
+        # ===============================
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        if os.getenv("DATABASE_URL"):
             cur.execute(
-                "UPDATE boss SET password=?, status='ACTIVE' WHERE boss_id=?", 
-                (hashed, boss_id)
+                "UPDATE boss SET password=%s, status=%s WHERE boss_id=%s",
+                (hashed, "ACTIVE", boss_id)
             )
-            conn.commit()
-            conn.close()
+        else:
+            cur.execute(
+                "UPDATE boss SET password=?, status=? WHERE boss_id=?",
+                (hashed, "ACTIVE", boss_id)
+            )
 
-            # ✅ Onyesha message ya mafanikio na rudisha login
-            flash("PIN mpya imewekwa kwa mafanikio. Unaweza ku-login sasa.", "success")
-            return redirect(url_for("boss_login"))
+        conn.commit()
+        conn.close()
 
-    # 📄 Rudisha template ya ku-set PIN kama bado form haijasubmit
+        # ===============================
+        # ✅ SUCCESS
+        # ===============================
+        flash("PIN mpya imewekwa kwa mafanikio. Unaweza ku-login sasa.", "success")
+        return redirect(url_for("boss_login"))
+
+    # ===============================
+    # 📄 GET REQUEST (SHOW FORM)
+    # ===============================
     return render_template("boss_set_new_pin.html")
 
-
-
-from flask import render_template, session, redirect, url_for, flash
-import sqlite3
 
 @app.route("/boss_dashboard")
 def boss_dashboard():
     import sqlite3
     from datetime import datetime, date
+    import os
 
     if "boss_id" not in session:
         flash("Tafadhali ingia kwanza", "danger")
@@ -1274,34 +1666,70 @@ def boss_dashboard():
 
     boss_id = session["boss_id"]
 
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    # 🔥 AUTO SWITCH DATABASE
+    db_url = os.getenv("DATABASE_URL")
 
-    boss = conn.execute("SELECT * FROM boss WHERE boss_id=?", (boss_id,)).fetchone()
+    if db_url:
+        import psycopg2
+        import psycopg2.extras
+        conn = psycopg2.connect(db_url, sslmode="require")
+        conn.autocommit = True
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        db_type = "postgres"
+    else:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        db_type = "sqlite"
+
+    # 🔥 HELPER FUNCTION
+    def query(sqlite_q, postgres_q, params):
+        if db_type == "postgres":
+            cur.execute(postgres_q, params)
+            return cur.fetchall()
+        else:
+            cur.execute(sqlite_q, params)
+            return cur.fetchall()
+
+    def query_one(sqlite_q, postgres_q, params):
+        if db_type == "postgres":
+            cur.execute(postgres_q, params)
+            return cur.fetchone()
+        else:
+            cur.execute(sqlite_q, params)
+            return cur.fetchone()
+
+    # ======================================================
+    # 🔥 BOSS
+    # ======================================================
+    boss = query_one(
+        "SELECT * FROM boss WHERE boss_id=?",
+        "SELECT * FROM boss WHERE boss_id=%s",
+        (boss_id,)
+    )
+
     if not boss:
         conn.close()
         flash("Boss haipo kwenye systemu!", "danger")
         return redirect(url_for("boss_login"))
 
     today = date.today()
-    trial_end_date = boss['trial_end_date']
-    subscription_end_date = boss['subscription_end_date']
+    today_str = datetime.now().strftime("%Y-%m-%d")
 
     def parse_date(dt_str):
         if not dt_str:
             return None
         try:
             return datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S").date()
-        except ValueError:
+        except:
             return datetime.strptime(dt_str, "%Y-%m-%d").date()
 
-    trial_end = parse_date(trial_end_date)
-    subscription_end = parse_date(subscription_end_date)
+    trial_end = parse_date(boss['trial_end_date'])
+    subscription_end = parse_date(boss['subscription_end_date'])
 
     on_trial = trial_end and trial_end >= today
     subscription_expired = not on_trial and (not subscription_end or subscription_end < today)
 
-    boss_message = ""
     if on_trial:
         boss_message = "Umepata muda wa trial, tafadhali jaribu mfumo na tupe maoni yako."
     elif subscription_expired:
@@ -1314,50 +1742,108 @@ def boss_dashboard():
         show_welcome = True
         session.pop('just_signed_up', None)
 
-    customers_raw = conn.execute("""
-        SELECT * FROM customers 
-        WHERE boss_id=? 
-        ORDER BY full_name
-    """, (boss_id,)).fetchall()
+    # ======================================================
+    # 🔥 CUSTOMERS
+    # ======================================================
+    customers_raw = query(
+        """SELECT * FROM customers WHERE boss_id=? ORDER BY full_name""",
+        """SELECT * FROM customers WHERE boss_id=%s ORDER BY full_name""",
+        (boss_id,)
+    )
 
-    meters_raw = conn.execute("""
+    # ======================================================
+    # 🔥 METERS
+    # ======================================================
+    meters_raw = query(
+        """
         SELECT * FROM meters 
         WHERE customer_id IN (
             SELECT customer_id FROM customers WHERE boss_id=?
         )
-    """, (boss_id,)).fetchall()
+        """,
+        """
+        SELECT * FROM meters 
+        WHERE customer_id IN (
+            SELECT customer_id FROM customers WHERE boss_id=%s
+        )
+        """,
+        (boss_id,)
+    )
 
-    unpaid_bills = conn.execute("""
+    # ======================================================
+    # 🔥 UNPAID BILLS
+    # ======================================================
+    unpaid_bills = query(
+        """
         SELECT b.*, c.full_name AS customer_name, m.meter_number
         FROM bills b
         JOIN customers c ON b.customer_id = c.customer_id
         LEFT JOIN meters m ON b.meter_id = m.meter_id
         WHERE b.status='UNPAID' AND c.boss_id=?
         ORDER BY b.billing_month DESC
-    """, (boss_id,)).fetchall()
+        """,
+        """
+        SELECT b.*, c.full_name AS customer_name, m.meter_number
+        FROM bills b
+        JOIN customers c ON b.customer_id = c.customer_id
+        LEFT JOIN meters m ON b.meter_id = m.meter_id
+        WHERE b.status='UNPAID' AND c.boss_id=%s
+        ORDER BY b.billing_month DESC
+        """,
+        (boss_id,)
+    )
 
-    total_unpaid_amount = conn.execute("""
+    total_unpaid_amount = query_one(
+        """
         SELECT SUM(b.amount) as total
         FROM bills b
         JOIN customers c ON b.customer_id = c.customer_id
         WHERE b.status='UNPAID' AND c.boss_id=?
-    """, (boss_id,)).fetchone()['total'] or 0
+        """,
+        """
+        SELECT COALESCE(SUM(b.amount),0) as total
+        FROM bills b
+        JOIN customers c ON b.customer_id = c.customer_id
+        WHERE b.status='UNPAID' AND c.boss_id=%s
+        """,
+        (boss_id,)
+    )['total'] or 0
 
-    total_payments = conn.execute("""
+    total_payments = query_one(
+        """
         SELECT SUM(p.amount_paid) as total
         FROM payments p
         JOIN customers c ON p.customer_id = c.customer_id
         WHERE c.boss_id=?
-    """, (boss_id,)).fetchone()['total'] or 0
+        """,
+        """
+        SELECT COALESCE(SUM(p.amount_paid),0) as total
+        FROM payments p
+        JOIN customers c ON p.customer_id = c.customer_id
+        WHERE c.boss_id=%s
+        """,
+        (boss_id,)
+    )['total'] or 0
 
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    today_total = conn.execute("""
+    today_total = query_one(
+        """
         SELECT SUM(amount_paid) as total
         FROM payments
         WHERE boss_id=? AND DATE(paid_at)=?
-    """, (boss_id, today_str)).fetchone()['total'] or 0
+        """,
+        """
+        SELECT COALESCE(SUM(amount_paid),0) as total
+        FROM payments
+        WHERE boss_id=%s AND DATE(paid_at)=%s
+        """,
+        (boss_id, today_str)
+    )['total'] or 0
 
-    skipped_meters = conn.execute("""
+    # ======================================================
+    # 🔥 SKIPPED METERS (IMPORTANT FIX)
+    # ======================================================
+    skipped_meters = query_one(
+        """
         SELECT COUNT(DISTINCT m.meter_id) as total
         FROM meters m
         JOIN customers c ON m.customer_id = c.customer_id
@@ -1369,18 +1855,49 @@ def boss_dashboard():
             WHERE b2.meter_id = m.meter_id
             AND b2.billing_month = strftime('%Y-%m','now')
         )
-    """, (boss_id,)).fetchone()["total"] or 0
+        """,
+        """
+        SELECT COUNT(DISTINCT m.meter_id) as total
+        FROM meters m
+        JOIN customers c ON m.customer_id = c.customer_id
+        LEFT JOIN bills b ON m.meter_id = b.meter_id
+        WHERE c.boss_id=%s
+        AND b.billing_month IS NOT NULL
+        AND NOT EXISTS (
+            SELECT 1 FROM bills b2
+            WHERE b2.meter_id = m.meter_id
+            AND TO_CHAR(b2.billing_month, 'YYYY-MM') = TO_CHAR(CURRENT_DATE, 'YYYY-MM')
+        )
+        """,
+        (boss_id,)
+    )['total'] or 0
 
-    # 🔥 NEW: Meter zilizosomwa leo
-    meters_today = conn.execute("""
+    # ======================================================
+    # 🔥 METERS TODAY
+    # ======================================================
+    meters_today = query_one(
+        """
         SELECT COUNT(*) as total
         FROM meter_readings mr
         JOIN meters m ON mr.meter_id = m.meter_id
         JOIN customers c ON m.customer_id = c.customer_id
         WHERE mr.reading_date = ?
         AND c.boss_id = ?
-    """, (today_str, boss_id)).fetchone()["total"] or 0
+        """,
+        """
+        SELECT COUNT(*) as total
+        FROM meter_readings mr
+        JOIN meters m ON mr.meter_id = m.meter_id
+        JOIN customers c ON m.customer_id = c.customer_id
+        WHERE DATE(mr.reading_date) = %s
+        AND c.boss_id = %s
+        """,
+        (today_str, boss_id)
+    )['total'] or 0
 
+    # ======================================================
+    # 🔥 MAP + COUNTS
+    # ======================================================
     meters_map = {}
     for m in meters_raw:
         meters_map.setdefault(m['customer_id'], []).append({
@@ -1402,14 +1919,30 @@ def boss_dashboard():
         1 for mlist in meters_map.values() for m in mlist if m['status'] != 'ACTIVE'
     )
 
-    recent_logs = conn.execute("""
+    # ======================================================
+    # 🔥 LOGS
+    # ======================================================
+    recent_logs = query(
+        """
         SELECT * FROM activity_logs
         WHERE boss_id=?
         ORDER BY time DESC
         LIMIT 5
-    """, (boss_id,)).fetchall()
+        """,
+        """
+        SELECT * FROM activity_logs
+        WHERE boss_id=%s
+        ORDER BY time DESC
+        LIMIT 5
+        """,
+        (boss_id,)
+    )
 
-    announcements = conn.execute("""
+    # ======================================================
+    # 🔥 ANNOUNCEMENTS
+    # ======================================================
+    announcements = query(
+        """
         SELECT a.id, a.title, a.message, a.created_at,
                COALESCE(ar.is_read, 0) as is_read
         FROM announcements a
@@ -1418,16 +1951,37 @@ def boss_dashboard():
             AND ar.boss_id = ?
         WHERE ar.announcement_id IS NULL
         ORDER BY a.created_at DESC
-    """, (boss_id,)).fetchall()
+        """,
+        """
+        SELECT a.id, a.title, a.message, a.created_at,
+               COALESCE(ar.is_read, 0) as is_read
+        FROM announcements a
+        LEFT JOIN announcement_reads ar
+            ON a.id = ar.announcement_id
+            AND ar.boss_id = %s
+        WHERE ar.announcement_id IS NULL
+        ORDER BY a.created_at DESC
+        """,
+        (boss_id,)
+    )
 
     show_announcement = None
     for ann in announcements:
         if ann['is_read'] == 0 or ann['is_read'] is None:
             show_announcement = ann
-            conn.execute("""
-                INSERT OR REPLACE INTO announcement_reads (boss_id, announcement_id, is_read)
-                VALUES (?, ?, 1)
-            """, (boss_id, ann['id']))
+
+            if db_type == "postgres":
+                cur.execute("""
+                    INSERT INTO announcement_reads (boss_id, announcement_id, is_read)
+                    VALUES (%s,%s,1)
+                    ON CONFLICT DO NOTHING
+                """, (boss_id, ann['id']))
+            else:
+                cur.execute("""
+                    INSERT OR REPLACE INTO announcement_reads (boss_id, announcement_id, is_read)
+                    VALUES (?,?,1)
+                """, (boss_id, ann['id']))
+
             conn.commit()
             break
 
@@ -1448,249 +2002,498 @@ def boss_dashboard():
         show_welcome=show_welcome,
         announcement=show_announcement,
         boss_message=boss_message,
-        meters_today=meters_today  # 🔥 NEW VARIABLE
+        meters_today=meters_today
     )
 
 
-from werkzeug.security import generate_password_hash
-
 @app.route("/boss/settings", methods=["GET", "POST"])
 def boss_settings():
+    from werkzeug.security import generate_password_hash
+    import os
+
     if "boss_id" not in session:
         return redirect(url_for("boss_login"))
 
+    boss_id = session["boss_id"]
+
+    # ======================================================
+    # 🔥 DUAL DB CONNECTION
+    # ======================================================
+    def get_db():
+        import sqlite3
+        db_url = os.getenv("DATABASE_URL")
+
+        if db_url:
+            import psycopg2
+            import psycopg2.extras
+
+            conn = psycopg2.connect(db_url, sslmode="require")
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            return conn, cur, "postgres"
+        else:
+            conn = sqlite3.connect(DB_PATH)
+            cur = conn.cursor()
+            return conn, cur, "sqlite"
+
+    conn, cur, db_type = get_db()
+
+    # ======================================================
+    # 🔥 UPDATE PASSWORD (POST ONLY)
+    # ======================================================
     if request.method == "POST":
         new_password = request.form.get("new_password")
-        if new_password:
-            new_password = new_password.strip()  # Ondoa spaces zisizo lazima
 
-            # Hash password compatible na check_password_hash
+        if new_password:
+            new_password = new_password.strip()
+
             hashed = generate_password_hash(new_password)
 
-            conn = get_db_connection()
-            cur = conn.cursor()
-            cur.execute("""
-                UPDATE boss 
-                SET password = ? 
-                WHERE boss_id = ?
-            """, (hashed, session["boss_id"]))
+            if db_type == "postgres":
+                cur.execute("""
+                    UPDATE boss 
+                    SET password = %s 
+                    WHERE boss_id = %s
+                """, (hashed, boss_id))
+            else:
+                cur.execute("""
+                    UPDATE boss 
+                    SET password = ? 
+                    WHERE boss_id = ?
+                """, (hashed, boss_id))
+
             conn.commit()
             conn.close()
 
             flash("Password updated successfully!", "success")
+            return redirect(url_for("boss_settings"))
+
+    conn.close()
 
     return render_template("boss_settings.html")
 
 
+
 @app.route("/boss/activity_logs")
 def boss_activity_logs():
+    import os
+    import sqlite3
 
-    # Hakikisha boss amelogin
+    # ===============================
+    # 🔐 LOGIN CHECK
+    # ===============================
     if "boss_id" not in session:
         flash("Tafadhali login kwanza", "danger")
-        return redirect(url_for("login"))
+        return redirect(url_for("boss_login"))
 
-    conn = sqlite3.connect("water_supply.db")
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
+    boss_id = session["boss_id"]
 
-    # 🔥 Chukua taarifa za boss
-    cursor.execute("SELECT * FROM boss WHERE id = ?", (session["boss_id"],))
+    # ===============================
+    # 🔌 DB CONNECTION (DUAL)
+    # ===============================
+    def get_db():
+        db_url = os.getenv("DATABASE_URL")
+
+        if db_url:
+            import psycopg2
+            import psycopg2.extras
+
+            conn = psycopg2.connect(db_url, sslmode="require")
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            return conn, cur, "postgres"
+        else:
+            conn = sqlite3.connect("water_supply.db")
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            return conn, cur, "sqlite"
+
+    conn, cursor, db_type = get_db()
+
+    # ===============================
+    # 🔥 GET BOSS DATA
+    # ===============================
+    if db_type == "postgres":
+        cursor.execute("SELECT * FROM boss WHERE boss_id = %s", (boss_id,))
+    else:
+        cursor.execute("SELECT * FROM boss WHERE boss_id = ?", (boss_id,))
+
     boss = cursor.fetchone()
 
-    # Chukua logs zote
+    # ===============================
+    # 🔥 GET ACTIVITY LOGS
+    # ===============================
     cursor.execute("""
-        SELECT * FROM activity_logs
+        SELECT * 
+        FROM activity_logs
         ORDER BY time DESC
     """)
+
     logs = cursor.fetchall()
 
     conn.close()
 
-    # 🔥 Tuma boss + logs
+    # ===============================
+    # 📤 RENDER TEMPLATE
+    # ===============================
     return render_template(
         "boss_activity_logs.html",
         logs=logs,
         boss=boss
     )
+
     
 
 @app.route("/boss/activity_logs/filter", methods=["GET", "POST"])
 def boss_activity_logs_filter():
+    import os
+    import sqlite3
 
-    # 🔐 Hakikisha boss ame-login
+    # ===============================
+    # 🔐 LOGIN CHECK
+    # ===============================
     if "boss_id" not in session:
         flash("Tafadhali ingia kwanza", "danger")
         return redirect(url_for("boss_login"))
 
-    # 📌 Chukua boss_id kutoka session
     boss_id = session["boss_id"]
 
-    # 🔌 Fungua connection ya database
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
+    # ===============================
+    # 🔌 DUAL DB CONNECTION
+    # ===============================
+    def get_db():
+        db_url = os.getenv("DATABASE_URL")
 
-    # 📦 Variable ya kuhifadhi logs zitakazopatikana
+        if db_url:
+            import psycopg2
+            import psycopg2.extras
+
+            conn = psycopg2.connect(db_url, sslmode="require")
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            return conn, cur, "postgres"
+        else:
+            conn = sqlite3.connect(DB_PATH)
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            return conn, cur, "sqlite"
+
+    conn, cursor, db_type = get_db()
+
     logs = []
 
-    # -------------------------------
-    # 📥 Ikiwa form ime-submit (POST request)
-    # -------------------------------
+    # ===============================
+    # 📥 POST FILTER LOGIC
+    # ===============================
     if request.method == "POST":
-        # 📅 Pokea mwezi na mwaka kutoka form
-        month = request.form.get("month")  # format: "03"
-        year  = request.form.get("year")   # format: "2026"
+        month = request.form.get("month")
+        year = request.form.get("year")
 
         if month and year:
-            # 🔍 Filter activity logs kwa boss, mwaka, mwezi
-            logs = cursor.execute("""
-                SELECT * FROM activity_logs
-                WHERE boss_id = ?
-                  AND strftime('%Y', time) = ?
-                  AND strftime('%m', time) = ?
-                ORDER BY time DESC
-            """, (
-                boss_id,
-                year,
-                month.zfill(2)
-            )).fetchall()
+
+            # ===============================
+            # 🔥 SQLITE QUERY
+            # ===============================
+            if db_type == "sqlite":
+                cursor.execute("""
+                    SELECT * FROM activity_logs
+                    WHERE boss_id = ?
+                      AND strftime('%Y', time) = ?
+                      AND strftime('%m', time) = ?
+                    ORDER BY time DESC
+                """, (boss_id, year, month.zfill(2)))
+
+            # ===============================
+            # 🔥 POSTGRESQL QUERY
+            # ===============================
+            else:
+                cursor.execute("""
+                    SELECT * FROM activity_logs
+                    WHERE boss_id = %s
+                      AND TO_CHAR(time, 'YYYY') = %s
+                      AND TO_CHAR(time, 'MM') = %s
+                    ORDER BY time DESC
+                """, (boss_id, year, month.zfill(2)))
+
+            logs = cursor.fetchall()
+
         else:
             flash("Chagua mwezi na mwaka sahihi", "danger")
 
-    # 🔥 Chukua taarifa za boss (fix: tumia boss_id, sio id)
-    cursor.execute("SELECT * FROM boss WHERE boss_id = ?", (boss_id,))
+    # ===============================
+    # 🔥 GET BOSS INFO (SAFE BOTH DBs)
+    # ===============================
+    if db_type == "postgres":
+        cursor.execute("SELECT * FROM boss WHERE boss_id = %s", (boss_id,))
+    else:
+        cursor.execute("SELECT * FROM boss WHERE boss_id = ?", (boss_id,))
+
     boss = cursor.fetchone()
 
-    # 🔒 Funga connection ya database
     conn.close()
 
-    # -------------------------------
-    # 🎨 Rudisha template pamoja na data ya logs na boss
-    # -------------------------------
+    # ===============================
+    # 🎨 RENDER
+    # ===============================
     return render_template(
         "boss_activity_logs.html",
         logs=logs,
-        boss=boss   # ✅ sasa template itapata boss.full_name
+        boss=boss
     )
 
 
-
+#Je hii ipo sawa kulingana na connection yangu?
 @app.route("/boss/logout")
 def boss_logout():
-    boss_id = session.get("boss_id")  # pata boss_id ya aliye login
 
+    boss_id = session.get("boss_id")
+
+    # ===============================
+    # 🔌 ONLY UPDATE IF LOGGED IN
+    # ===============================
     if boss_id:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        # 🔹 UPDATE ONLINE STATUS
-        cur.execute("UPDATE boss SET is_online = 0 WHERE boss_id = ?", (boss_id,))
+
+        def get_db():
+            db_url = os.getenv("DATABASE_URL")
+
+            if db_url:
+                import psycopg2
+
+                conn = psycopg2.connect(db_url, sslmode="require")
+                cur = conn.cursor()
+                return conn, cur, "postgres"
+            else:
+                conn = sqlite3.connect(DB_PATH)
+                cur = conn.cursor()
+                return conn, cur, "sqlite"
+
+        conn, cur, db_type = get_db()
+
+        # ===============================
+        # 🔥 UPDATE ONLINE STATUS
+        # ===============================
+        if db_type == "postgres":
+            cur.execute("""
+                UPDATE boss
+                SET is_online = %s
+                WHERE boss_id = %s
+            """, (0, boss_id))
+        else:
+            cur.execute("""
+                UPDATE boss
+                SET is_online = ?
+                WHERE boss_id = ?
+            """, (0, boss_id))
+
         conn.commit()
-        cur.close()
         conn.close()
 
-    # 🔐 Ondoa boss_id kwenye session (kumtoa user kwenye mfumo)
+    # ===============================
+    # 🔐 CLEAR SESSION
+    # ===============================
     session.pop("boss_id", None)
 
-    # 📢 Toa ujumbe wa mafanikio baada ya logout
+    # ===============================
+    # 📢 FEEDBACK
+    # ===============================
     flash("Umetoka kwenye dashboard ya boss", "success")
-
-    # 🔁 Mpeleke user kwenye ukurasa wa login
     return redirect(url_for("boss_login"))
+
 
 
 # ================= CUSTOMER MANAGEMENT ==================
 
 @app.route("/boss/add_customer", methods=["GET", "POST"])
 def add_customer():
-    if "boss_id" not in session:
-        flash("Tafadhali ingia kwanza", "danger")
-        return redirect(url_for("boss_login"))
+    import os
+    import sqlite3
+    from datetime import datetime
+    import uuid
 
-    if request.method == "POST":
-        # Trim all inputs to avoid spaces issues
-        full_name = request.form.get("full_name", "").strip()
-        phone = request.form.get("phone", "").strip()
-        area = request.form.get("area", "").strip()
-        house_number = request.form.get("house_number", "").strip()
-        meter_number = request.form.get("meter_number", "").strip()
-
-        # Validation
-        if not full_name or not meter_number:
-            flash("Jina kamili na meter number ni lazima!", "danger")
-            return redirect(url_for("add_customer"))
-
-        conn = get_db_connection()
-        cur = conn.cursor()
-
-        try:
-            # Check if meter exists
-            cur.execute("SELECT * FROM meters WHERE meter_number = ?", (meter_number,))
-            existing_meter = cur.fetchone()
-            if existing_meter:
-                flash(f"⚠️ Meter {meter_number} tayari ipo kwenye mfumo.", "warning")
-                return redirect(url_for("add_customer"))
-
-            # Check if customer exists
-            cur.execute(
-                "SELECT * FROM customers WHERE full_name=? AND phone=? AND boss_id=?",
-                (full_name, phone, session["boss_id"])
-            )
-            existing_customer = cur.fetchone()
-
-            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            status = "ACTIVE"
-
-            if existing_customer:
-                customer_id = existing_customer["customer_id"]
-                flash(f"ℹ️ Mteja {full_name} tayari yupo. Tena tunaongeza meter.", "info")
-            else:
-                # Insert new customer
-                customer_id = "CUST-" + str(uuid.uuid4())[:8]
-                cur.execute("""
-                    INSERT INTO customers 
-                    (customer_id, boss_id, full_name, phone, area, house_number, status, created_at, signup_date)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (customer_id, session["boss_id"], full_name, phone, area, house_number, status, now, now))
-                flash(f"✅ Mteja {full_name} amesajiliwa kikamilifu!", "success")
-
-            # Insert meter with created_at timestamp
-            meter_id = "MTR-" + str(uuid.uuid4())[:8]
-            cur.execute("""
-                INSERT INTO meters (meter_id, meter_number, customer_id, status, created_at)
-                VALUES (?, ?, ?, ?, ?)
-            """, (meter_id, meter_number, customer_id, status, now))
-
-            conn.commit()
-            flash(f"✅ Meter {meter_number} imeongezwa kwa {full_name}", "success")
-
-        except Exception as e:
-            conn.rollback()
-            flash(f"❌ Tatizo limetokea: {str(e)}", "danger")
-        finally:
-            conn.close()
-
-        return redirect(url_for("boss_dashboard"))
-
-    return render_template("add_customer.html")
-
-
-@app.route("/boss/edit_customer/<customer_id>", methods=["GET", "POST"])
-def edit_customer(customer_id):
+    # ===============================
+    # 🔐 LOGIN CHECK
+    # ===============================
     if "boss_id" not in session:
         flash("Tafadhali ingia kwanza", "danger")
         return redirect(url_for("boss_login"))
 
     boss_id = session["boss_id"]
 
-    conn = get_db_connection()
-    cur = conn.cursor()
+    # ===============================
+    # 🔌 DUAL DB CONNECTION
+    # ===============================
+    def get_db():
+        db_url = os.getenv("DATABASE_URL")
 
-    # ✅ Hakikisha customer ni wa boss huyu
-    cur.execute("""
-        SELECT * FROM customers 
-        WHERE customer_id=? AND boss_id=?
-    """, (customer_id, boss_id))
+        if db_url:
+            import psycopg2
+
+            conn = psycopg2.connect(db_url, sslmode="require")
+            cur = conn.cursor()
+            return conn, cur, "postgres"
+        else:
+            conn = sqlite3.connect(DB_PATH)
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            return conn, cur, "sqlite"
+
+    conn, cur, db_type = get_db()
+
+    # ===============================
+    # 📥 POST REQUEST
+    # ===============================
+    if request.method == "POST":
+
+        full_name = request.form.get("full_name", "").strip()
+        phone = request.form.get("phone", "").strip()
+        area = request.form.get("area", "").strip()
+        house_number = request.form.get("house_number", "").strip()
+        meter_number = request.form.get("meter_number", "").strip()
+
+        # ===============================
+        # ⚠️ VALIDATION
+        # ===============================
+        if not full_name or not meter_number:
+            flash("Jina kamili na meter number ni lazima!", "danger")
+            conn.close()
+            return redirect(url_for("add_customer"))
+
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        status = "ACTIVE"
+
+        try:
+
+            # ===============================
+            # 🔍 CHECK METER EXISTENCE
+            # ===============================
+            if db_type == "postgres":
+                cur.execute("SELECT * FROM meters WHERE meter_number = %s", (meter_number,))
+            else:
+                cur.execute("SELECT * FROM meters WHERE meter_number = ?", (meter_number,))
+
+            existing_meter = cur.fetchone()
+
+            if existing_meter:
+                flash(f"⚠️ Meter {meter_number} tayari ipo kwenye mfumo.", "warning")
+                conn.close()
+                return redirect(url_for("add_customer"))
+
+            # ===============================
+            # 🔍 CHECK CUSTOMER
+            # ===============================
+            if db_type == "postgres":
+                cur.execute("""
+                    SELECT * FROM customers
+                    WHERE full_name = %s AND phone = %s AND boss_id = %s
+                """, (full_name, phone, boss_id))
+            else:
+                cur.execute("""
+                    SELECT * FROM customers
+                    WHERE full_name = ? AND phone = ? AND boss_id = ?
+                """, (full_name, phone, boss_id))
+
+            existing_customer = cur.fetchone()
+
+            # ===============================
+            # 👤 CREATE OR GET CUSTOMER ID
+            # ===============================
+            if existing_customer:
+                customer_id = existing_customer[0] if db_type == "postgres" else existing_customer["customer_id"]
+                flash(f"ℹ️ Mteja {full_name} tayari yupo. Tunaongeza meter.", "info")
+            else:
+                customer_id = "CUST-" + str(uuid.uuid4())[:8]
+
+                if db_type == "postgres":
+                    cur.execute("""
+                        INSERT INTO customers
+                        (customer_id, boss_id, full_name, phone, area, house_number, status, created_at, signup_date)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (customer_id, boss_id, full_name, phone, area, house_number, status, now, now))
+                else:
+                    cur.execute("""
+                        INSERT INTO customers
+                        (customer_id, boss_id, full_name, phone, area, house_number, status, created_at, signup_date)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (customer_id, boss_id, full_name, phone, area, house_number, status, now, now))
+
+                flash(f"✅ Mteja {full_name} amesajiliwa kikamilifu!", "success")
+
+            # ===============================
+            # 🔌 INSERT METER
+            # ===============================
+            meter_id = "MTR-" + str(uuid.uuid4())[:8]
+
+            if db_type == "postgres":
+                cur.execute("""
+                    INSERT INTO meters (meter_id, meter_number, customer_id, status, created_at)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (meter_id, meter_number, customer_id, status, now))
+            else:
+                cur.execute("""
+                    INSERT INTO meters (meter_id, meter_number, customer_id, status, created_at)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (meter_id, meter_number, customer_id, status, now))
+
+            conn.commit()
+
+            flash(f"✅ Meter {meter_number} imeongezwa kwa {full_name}", "success")
+            return redirect(url_for("boss_dashboard"))
+
+        except Exception as e:
+            conn.rollback()
+            flash(f"❌ Tatizo limetokea: {str(e)}", "danger")
+
+        finally:
+            conn.close()
+
+    return render_template("add_customer.html")
+
+
+@app.route("/boss/edit_customer/<customer_id>", methods=["GET", "POST"])
+def edit_customer(customer_id):
+    import os
+    import sqlite3
+
+    # ===============================
+    # 🔐 LOGIN CHECK
+    # ===============================
+    if "boss_id" not in session:
+        flash("Tafadhali ingia kwanza", "danger")
+        return redirect(url_for("boss_login"))
+
+    boss_id = session["boss_id"]
+
+    # ===============================
+    # 🔌 DUAL DB CONNECTION
+    # ===============================
+    def get_db():
+        db_url = os.getenv("DATABASE_URL")
+
+        if db_url:
+            import psycopg2
+
+            conn = psycopg2.connect(db_url, sslmode="require")
+            cur = conn.cursor()
+            return conn, cur, "postgres"
+        else:
+            conn = sqlite3.connect(DB_PATH)
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            return conn, cur, "sqlite"
+
+    conn, cur, db_type = get_db()
+
+    # ===============================
+    # 🔍 GET CUSTOMER (SECURE OWNERSHIP CHECK)
+    # ===============================
+    if db_type == "postgres":
+        cur.execute("""
+            SELECT * FROM customers
+            WHERE customer_id = %s AND boss_id = %s
+        """, (customer_id, boss_id))
+    else:
+        cur.execute("""
+            SELECT * FROM customers
+            WHERE customer_id = ? AND boss_id = ?
+        """, (customer_id, boss_id))
+
     customer = cur.fetchone()
 
     if not customer:
@@ -1698,36 +2501,69 @@ def edit_customer(customer_id):
         conn.close()
         return redirect(url_for("boss_dashboard"))
 
-    # ✅ Pata meter ya huyu customer
-    cur.execute("""
-        SELECT * FROM meters WHERE customer_id=?
-    """, (customer_id,))
+    # ===============================
+    # 🔍 GET METER
+    # ===============================
+    if db_type == "postgres":
+        cur.execute("""
+            SELECT * FROM meters WHERE customer_id = %s
+        """, (customer_id,))
+    else:
+        cur.execute("""
+            SELECT * FROM meters WHERE customer_id = ?
+        """, (customer_id,))
+
     meter = cur.fetchone()
 
+    # ===============================
+    # 📥 POST UPDATE
+    # ===============================
     if request.method == "POST":
-        full_name = request.form.get("full_name")
-        meter_number = request.form.get("meter_number")
+
+        full_name = request.form.get("full_name", "").strip()
+        meter_number = request.form.get("meter_number", "").strip()
 
         if not full_name:
             flash("Jaza jina la mteja", "danger")
+            conn.close()
             return redirect(url_for("edit_customer", customer_id=customer_id))
 
         try:
-            # ✅ Update jina tu
-            cur.execute("""
-                UPDATE customers 
-                SET full_name=? 
-                WHERE customer_id=? AND boss_id=?
-            """, (full_name, customer_id, boss_id))
 
-            # ✅ Kama meter ipo na imebadilishwa
-            if meter and meter_number and meter_number != meter["meter_number"]:
-
-                # 🔍 Check duplicate
+            # ===============================
+            # ✏️ UPDATE CUSTOMER NAME
+            # ===============================
+            if db_type == "postgres":
                 cur.execute("""
-                    SELECT meter_id FROM meters 
-                    WHERE meter_number=? AND meter_id != ?
-                """, (meter_number, meter["meter_id"]))
+                    UPDATE customers
+                    SET full_name = %s
+                    WHERE customer_id = %s AND boss_id = %s
+                """, (full_name, customer_id, boss_id))
+            else:
+                cur.execute("""
+                    UPDATE customers
+                    SET full_name = ?
+                    WHERE customer_id = ? AND boss_id = ?
+                """, (full_name, customer_id, boss_id))
+
+            # ===============================
+            # 🔥 UPDATE METER (IF EXISTS)
+            # ===============================
+            if meter and meter_number and meter_number != meter[1] if db_type == "sqlite" else meter[2]:
+
+                # ===============================
+                # 🔍 DUPLICATE CHECK
+                # ===============================
+                if db_type == "postgres":
+                    cur.execute("""
+                        SELECT meter_id FROM meters
+                        WHERE meter_number = %s AND meter_id != %s
+                    """, (meter_number, meter[0]))
+                else:
+                    cur.execute("""
+                        SELECT meter_id FROM meters
+                        WHERE meter_number = ? AND meter_id != ?
+                    """, (meter_number, meter["meter_id"]))
 
                 existing = cur.fetchone()
 
@@ -1736,85 +2572,140 @@ def edit_customer(customer_id):
                     conn.close()
                     return redirect(url_for("edit_customer", customer_id=customer_id))
 
-                # ✅ Update meter
-                cur.execute("""
-                    UPDATE meters 
-                    SET meter_number=? 
-                    WHERE meter_id=?
-                """, (meter_number, meter["meter_id"]))
+                # ===============================
+                # ✏️ UPDATE METER NUMBER
+                # ===============================
+                if db_type == "postgres":
+                    cur.execute("""
+                        UPDATE meters
+                        SET meter_number = %s
+                        WHERE meter_id = %s
+                    """, (meter_number, meter[0]))
+                else:
+                    cur.execute("""
+                        UPDATE meters
+                        SET meter_number = ?
+                        WHERE meter_id = ?
+                    """, (meter_number, meter["meter_id"]))
 
             conn.commit()
-            flash(f"Mteja {full_name} amesasishwa!", "success")
 
-        except sqlite3.Error as e:
-            flash(f"Kosa la database: {e}", "danger")
+            flash(f"Mteja {full_name} amesasishwa!", "success")
+            return redirect(url_for("boss_dashboard"))
+
+        except Exception as e:
+            conn.rollback()
+            flash(f"Kosa la database: {str(e)}", "danger")
 
         finally:
             conn.close()
 
-        return redirect(url_for("boss_dashboard"))
-
-    conn.close()
     return render_template("edit_customer.html", customer=customer, meter=meter)
-
-
 
 
 
 @app.route("/boss/deactivate_customer/<customer_id>")
 def deactivate_customer(customer_id):
+    import os
+    import sqlite3
 
-    # 🔐 Hakikisha boss ame-login kabla ya kufanya action yoyote
+    # ===============================
+    # 🔐 LOGIN CHECK
+    # ===============================
     if "boss_id" not in session:
         flash("Tafadhali ingia kwanza", "danger")
         return redirect(url_for("boss_login"))
 
-    # 🔌 Fungua connection ya database
-    conn = get_db_connection()
-    cur = conn.cursor()
+    boss_id = session["boss_id"]
 
-    # 🔍 Hakikisha mteja anayehitajika yupo kwenye database
-    cur.execute(
-        "SELECT * FROM customers WHERE customer_id=?", 
-        (customer_id,)
-    )
+    # ===============================
+    # 🔌 DUAL DB CONNECTION
+    # ===============================
+    def get_db():
+        db_url = os.getenv("DATABASE_URL")
+
+        if db_url:
+            import psycopg2
+
+            conn = psycopg2.connect(db_url, sslmode="require")
+            cur = conn.cursor()
+            return conn, cur, "postgres"
+        else:
+            conn = sqlite3.connect(DB_PATH)
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            return conn, cur, "sqlite"
+
+    conn, cur, db_type = get_db()
+
+    # ===============================
+    # 🔍 CHECK CUSTOMER OWNERSHIP
+    # ===============================
+    if db_type == "postgres":
+        cur.execute("""
+            SELECT * FROM customers
+            WHERE customer_id = %s AND boss_id = %s
+        """, (customer_id, boss_id))
+    else:
+        cur.execute("""
+            SELECT * FROM customers
+            WHERE customer_id = ? AND boss_id = ?
+        """, (customer_id, boss_id))
+
     customer = cur.fetchone()
 
-    # ❌ Kama mteja hayupo → rudisha error
+    # ❌ NOT FOUND
     if not customer:
-        flash("Mteja hayupo", "danger")
+        flash("Mteja hayupo au sio wako", "danger")
         conn.close()
         return redirect(url_for("boss_dashboard"))
 
     try:
-        # 🔒 Badilisha status ya mteja kuwa INACTIVE (kumfungia huduma)
-        cur.execute(
-            "UPDATE customers SET status='INACTIVE' WHERE customer_id=?", 
-            (customer_id,)
-        )
 
-        # 💾 Hifadhi mabadiliko kwenye database
+        # ===============================
+        # 🔒 DEACTIVATE CUSTOMER
+        # ===============================
+        if db_type == "postgres":
+            cur.execute("""
+                UPDATE customers
+                SET status = %s
+                WHERE customer_id = %s AND boss_id = %s
+            """, ("INACTIVE", customer_id, boss_id))
+        else:
+            cur.execute("""
+                UPDATE customers
+                SET status = ?
+                WHERE customer_id = ? AND boss_id = ?
+            """, ("INACTIVE", customer_id, boss_id))
+
         conn.commit()
 
-        # ✅ Ujumbe wa mafanikio
-        flash(f"Mteja {customer['full_name']} amefungwa!", "success")
+        # ===============================
+        # ✅ SUCCESS MESSAGE
+        # ===============================
+        full_name = customer["full_name"] if db_type == "sqlite" else customer[3]
+        flash(f"Mteja {full_name} amefungwa!", "success")
 
-    except sqlite3.Error as e:
-        # ⚠️ Kama kuna kosa la database
-        flash(f"Kosa la database: {e}", "danger")
+    except Exception as e:
+        conn.rollback()
+        flash(f"Kosa la database: {str(e)}", "danger")
 
     finally:
-        # 🔒 Hakikisha connection inafungwa kila wakati
         conn.close()
 
-    # 🔁 Rudisha boss kwenye dashboard
     return redirect(url_for("boss_dashboard"))
+
+
     
-
-
 @app.route("/boss/delete_customer/<customer_id>", methods=["GET", "POST"])
 def delete_customer(customer_id):
-    # 1️⃣ Hakikisha boss ameloga
+    import os
+    import sqlite3
+    from datetime import datetime
+
+    # ===============================
+    # 🔐 LOGIN CHECK
+    # ===============================
     if "boss_id" not in session:
         flash("Tafadhali ingia kwanza", "danger")
         return redirect(url_for("boss_login"))
@@ -1822,36 +2713,96 @@ def delete_customer(customer_id):
     boss_id = session["boss_id"]
     boss_name = session.get("boss_name")
 
-    # 🔌 Fungua connection na row_factory ili customer['full_name'] ifanye kazi
-    conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
+    # ===============================
+    # 🔌 DUAL DB CONNECTION
+    # ===============================
+    def get_db():
+        db_url = os.getenv("DATABASE_URL")
 
-    # 2️⃣ Pata info ya mteja
-    cur.execute("SELECT * FROM customers WHERE customer_id=?", (customer_id,))
+        if db_url:
+            import psycopg2
+
+            conn = psycopg2.connect(db_url, sslmode="require")
+            cur = conn.cursor()
+            return conn, cur, "postgres"
+        else:
+            conn = sqlite3.connect(DB_PATH)
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            return conn, cur, "sqlite"
+
+    conn, cur, db_type = get_db()
+
+    # ===============================
+    # 🔍 GET CUSTOMER (OWNERSHIP CHECK)
+    # ===============================
+    if db_type == "postgres":
+        cur.execute("""
+            SELECT * FROM customers
+            WHERE customer_id = %s AND boss_id = %s
+        """, (customer_id, boss_id))
+    else:
+        cur.execute("""
+            SELECT * FROM customers
+            WHERE customer_id = ? AND boss_id = ?
+        """, (customer_id, boss_id))
+
     customer = cur.fetchone()
+
     if not customer:
         flash("Mteja haipo kwenye mfumo", "danger")
         conn.close()
         return redirect(url_for("boss_dashboard"))
 
-    # 3️⃣ GET request: onyesha confirmation page
+    # ===============================
+    # 📄 CONFIRM PAGE (GET)
+    # ===============================
     if request.method == "GET":
         conn.close()
         return render_template("confirm_delete_customer.html", customer=customer)
 
-    # 4️⃣ POST request: thibitisha kufuta
-    if request.method == "POST":
-        try:
-            # delete meters associated na mteja
-            cur.execute("DELETE FROM meters WHERE customer_id=?", (customer_id,))
-            # delete customer
-            cur.execute("DELETE FROM customers WHERE customer_id=?", (customer_id,))
+    # ===============================
+    # 🗑 DELETE (POST)
+    # ===============================
+    try:
+        # -------------------------------
+        # 🔥 DELETE METERS FIRST
+        # -------------------------------
+        if db_type == "postgres":
+            cur.execute("DELETE FROM meters WHERE customer_id = %s", (customer_id,))
+        else:
+            cur.execute("DELETE FROM meters WHERE customer_id = ?", (customer_id,))
 
-            # 🔥 record activity log with timestamp
-            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # -------------------------------
+        # 🔥 DELETE CUSTOMER
+        # -------------------------------
+        if db_type == "postgres":
+            cur.execute("DELETE FROM customers WHERE customer_id = %s AND boss_id = %s", (customer_id, boss_id))
+        else:
+            cur.execute("DELETE FROM customers WHERE customer_id = ? AND boss_id = ?", (customer_id, boss_id))
+
+        # -------------------------------
+        # 🔥 ACTIVITY LOG
+        # -------------------------------
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        if db_type == "postgres":
             cur.execute("""
-                INSERT INTO activity_logs (user_name, role, action, details, boss_id, time)
+                INSERT INTO activity_logs
+                (user_name, role, action, details, boss_id, time)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (
+                boss_name,
+                "boss",
+                "Delete Customer",
+                f"Customer deleted ({customer_id})",
+                boss_id,
+                now
+            ))
+        else:
+            cur.execute("""
+                INSERT INTO activity_logs
+                (user_name, role, action, details, boss_id, time)
                 VALUES (?, ?, ?, ?, ?, ?)
             """, (
                 boss_name,
@@ -1862,75 +2813,24 @@ def delete_customer(customer_id):
                 now
             ))
 
-            # Commit ili kuhakikisha delete na log zote zinaenda
-            conn.commit()
+        conn.commit()
 
-            flash(f"Mteja {customer['full_name']} ameondolewa kwa ufanisi!", "success")
-        except Exception as e:  # 🔥 capture errors zote, sio sqlite tu
-            conn.rollback()
-            flash(f"Kosa limejitokeza: {e}", "danger")
-        finally:
-            conn.close()
+        flash(f"Mteja {customer['full_name']} ameondolewa kwa ufanisi!", "success")
 
-        # Rudisha boss dashboard baada ya delete
-        return redirect(url_for("boss_dashboard"))
+    except Exception as e:
+        conn.rollback()
+        flash(f"Kosa limejitokeza: {str(e)}", "danger")
 
-    boss_id = session["boss_id"]
-    boss_name = session.get("boss_name")
-
-    # 🔌 Fungua connection na row_factory
-    conn = get_db_connection()
-    conn.row_factory = sqlite3.Row  # 🔥 Hii inaruhusu customer['full_name'] kufanya kazi
-    cur = conn.cursor()
-
-    # 2️⃣ Pata info ya mteja
-    cur.execute("SELECT * FROM customers WHERE customer_id=?", (customer_id,))
-    customer = cur.fetchone()
-    if not customer:
-        flash("Mteja haipo kwenye mfumo", "danger")
+    finally:
         conn.close()
-        return redirect(url_for("boss_dashboard"))
 
-    # 3️⃣ GET request: onyesha confirmation page
-    if request.method == "GET":
-        conn.close()
-        return render_template("confirm_delete_customer.html", customer=customer)
+    return redirect(url_for("boss_dashboard"))
 
-    # 4️⃣ POST request: thibitisha kufuta
-    if request.method == "POST":
-        try:
-            # delete meters associated na mteja
-            cur.execute("DELETE FROM meters WHERE customer_id=?", (customer_id,))
-            # delete customer
-            cur.execute("DELETE FROM customers WHERE customer_id=?", (customer_id,))
 
-            # 🔥 record activity log with timestamp
-            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            cur.execute("""
-                INSERT INTO activity_logs (user_name, role, action, details, boss_id, time)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (
-                boss_name,
-                "boss",
-                "Delete Customer",
-                f"Customer {customer['full_name']} ({customer_id}) deleted",
-                boss_id,
-                now
-            ))
-
-            conn.commit()
-            flash(f"Mteja {customer['full_name']} ameondolewa kwa ufanisi!", "success")
-        except Exception as e:  # 🔥 Badilisha sqlite3.Error → Exception ili kushika error zote
-            flash(f"Kosa la database: {e}", "danger")
-        finally:
-            conn.close()
-
-        return redirect(url_for("boss_dashboard"))
 
 
     
 # ================= READ METER =====================
-
 
 @app.route("/read_meter", methods=["GET", "POST"])
 @check_access
@@ -1948,8 +2848,8 @@ def read_meter():
         user_id = session.get("boss_id")
         boss_id = user_id
 
-    conn = get_db_connection()
-    cur = conn.cursor()
+    # 🔌 FIXED CONNECTION (IMPORTANT)
+    conn, cur, db_type = get_db_connection()
     bill = None
 
     if request.method == "POST":
@@ -1969,13 +2869,23 @@ def read_meter():
             flash("⚠️ Reading iko nje ya range sahihi", "danger")
             return render_template("read_meter.html", bill=None)
 
-        cur.execute("""
-            SELECT m.meter_id, m.customer_id, m.status AS meter_status,
-                   c.full_name, c.status AS customer_status
-            FROM meters m
-            JOIN customers c ON m.customer_id = c.customer_id
-            WHERE m.meter_number=? AND c.boss_id=?
-        """, (meter_number, boss_id))
+        if db_type == "sqlite":
+            cur.execute("""
+                SELECT m.meter_id, m.customer_id, m.status AS meter_status,
+                       c.full_name, c.status AS customer_status
+                FROM meters m
+                JOIN customers c ON m.customer_id = c.customer_id
+                WHERE m.meter_number=? AND c.boss_id=?
+            """, (meter_number, boss_id))
+        else:
+            cur.execute("""
+                SELECT m.meter_id, m.customer_id, m.status AS meter_status,
+                       c.full_name, c.status AS customer_status
+                FROM meters m
+                JOIN customers c ON m.customer_id = c.customer_id
+                WHERE m.meter_number=%s AND c.boss_id=%s
+            """, (meter_number, boss_id))
+
         meter = cur.fetchone()
         if not meter:
             flash("Meter hii haipo au sio ya wateja wako", "danger")
@@ -1994,24 +2904,37 @@ def read_meter():
 
         billing_month = datetime.now().strftime("%Y-%m")
 
-        cur.execute("""
-            SELECT current_reading, billing_month FROM bills
-            WHERE meter_id=?
-            ORDER BY created_at DESC
-            LIMIT 1
-        """, (meter["meter_id"],))
+        if db_type == "sqlite":
+            cur.execute("""
+                SELECT current_reading, billing_month FROM bills
+                WHERE meter_id=?
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, (meter["meter_id"],))
+        else:
+            cur.execute("""
+                SELECT current_reading, billing_month FROM bills
+                WHERE meter_id=%s
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, (meter["meter_id"],))
+
         last_bill = cur.fetchone()
 
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        # 🔥 NEW: tarehe ya leo kwa meter_readings
         today = datetime.now().strftime("%Y-%m-%d")
 
-        # 🔥 NEW: Zuia duplicate reading kwa siku moja
-        cur.execute("""
-            SELECT 1 FROM meter_readings
-            WHERE meter_id=? AND reading_date=?
-        """, (meter["meter_id"], today))
+        if db_type == "sqlite":
+            cur.execute("""
+                SELECT 1 FROM meter_readings
+                WHERE meter_id=? AND reading_date=?
+            """, (meter["meter_id"], today))
+        else:
+            cur.execute("""
+                SELECT 1 FROM meter_readings
+                WHERE meter_id=%s AND reading_date=%s
+            """, (meter["meter_id"], today))
+
         already_read = cur.fetchone()
 
         if already_read:
@@ -2020,20 +2943,33 @@ def read_meter():
             return render_template("read_meter.html", bill=None)
 
         if not last_bill:
-            cur.execute("""
-                INSERT INTO bills
-                (bill_id, customer_id, meter_id, previous_reading, current_reading, units_used,
-                 amount, billing_month, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                "BILL-" + str(uuid.uuid4())[:8],
-                meter["customer_id"],
-                meter["meter_id"],
-                0, current_reading, 0, 0,
-                billing_month, 'BASELINE', now
-            ))
+            if db_type == "sqlite":
+                cur.execute("""
+                    INSERT INTO bills
+                    (bill_id, customer_id, meter_id, previous_reading, current_reading, units_used,
+                     amount, billing_month, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    "BILL-" + str(uuid.uuid4())[:8],
+                    meter["customer_id"],
+                    meter["meter_id"],
+                    0, current_reading, 0, 0,
+                    billing_month, 'BASELINE', now
+                ))
+            else:
+                cur.execute("""
+                    INSERT INTO bills
+                    (bill_id, customer_id, meter_id, previous_reading, current_reading, units_used,
+                     amount, billing_month, status, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    "BILL-" + str(uuid.uuid4())[:8],
+                    meter["customer_id"],
+                    meter["meter_id"],
+                    0, current_reading, 0, 0,
+                    billing_month, 'BASELINE', now
+                ))
 
-            # 🔥 NEW: Save kwenye meter_readings
             cur.execute("""
                 INSERT INTO meter_readings
                 (reading_id, meter_id, reading_value, reading_date, recorded_by)
@@ -2054,7 +2990,6 @@ def read_meter():
         previous_reading = last_bill["current_reading"]
         last_billing_month = last_bill["billing_month"]
 
-        # 🔥 NEW: Check kama reading haijabadilika
         if previous_reading is not None and current_reading == previous_reading:
             flash("⚠️ Hakuna matumizi (reading haijabadilika)", "info")
             conn.close()
@@ -2071,11 +3006,19 @@ def read_meter():
             conn.close()
             return render_template("read_meter.html", bill=None)
 
-        cur.execute("""
-            SELECT price_per_unit FROM tariffs
-            WHERE boss_id=? ORDER BY created_at DESC LIMIT 1
-        """, (boss_id,))
+        if db_type == "sqlite":
+            cur.execute("""
+                SELECT price_per_unit FROM tariffs
+                WHERE boss_id=? ORDER BY created_at DESC LIMIT 1
+            """, (boss_id,))
+        else:
+            cur.execute("""
+                SELECT price_per_unit FROM tariffs
+                WHERE boss_id=%s ORDER BY created_at DESC LIMIT 1
+            """, (boss_id,))
+
         tariff = cur.fetchone()
+
         if not tariff:
             flash("⚠️ Hakuna tariff iliyowekwa. Tafadhali weka price per unit kwanza.", "danger")
             conn.close()
@@ -2084,16 +3027,25 @@ def read_meter():
         amount = units_used * tariff["price_per_unit"]
         bill_id = "BILL-" + str(uuid.uuid4())[:8]
 
-        cur.execute("""
-            INSERT INTO bills
-            (bill_id, customer_id, meter_id, previous_reading, current_reading,
-             units_used, amount, billing_month, status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (bill_id, meter["customer_id"], meter["meter_id"],
-              previous_reading, current_reading, units_used, amount,
-              billing_month, 'UNPAID', now))
+        if db_type == "sqlite":
+            cur.execute("""
+                INSERT INTO bills
+                (bill_id, customer_id, meter_id, previous_reading, current_reading,
+                 units_used, amount, billing_month, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (bill_id, meter["customer_id"], meter["meter_id"],
+                  previous_reading, current_reading, units_used, amount,
+                  billing_month, 'UNPAID', now))
+        else:
+            cur.execute("""
+                INSERT INTO bills
+                (bill_id, customer_id, meter_id, previous_reading, current_reading,
+                 units_used, amount, billing_month, status, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (bill_id, meter["customer_id"], meter["meter_id"],
+                  previous_reading, current_reading, units_used, amount,
+                  billing_month, 'UNPAID', now))
 
-        # 🔥 NEW: Save kwenye meter_readings
         cur.execute("""
             INSERT INTO meter_readings
             (reading_id, meter_id, reading_value, reading_date, recorded_by)
@@ -2124,7 +3076,7 @@ def read_meter():
 
 @app.route("/boss/meters")
 def boss_meters():
-    # Hakikisha boss ameingia
+    # 🔐 Hakikisha boss ameingia
     if "boss_id" not in session:
         flash("Tafadhali ingia kwanza", "danger")
         return redirect(url_for("boss_login"))
@@ -2134,8 +3086,8 @@ def boss_meters():
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Chukua wateja wote wa boss na meter zao
-    cur.execute("""
+    # 🔧 Auto-switch placeholder (SQLite ? / PostgreSQL %s)
+    query = """
         SELECT c.customer_id, c.full_name AS customer_name,
                c.phone, c.area, c.house_number,
                m.meter_id, m.meter_number, m.status AS meter_status
@@ -2143,17 +3095,23 @@ def boss_meters():
         LEFT JOIN meters m ON c.customer_id = m.customer_id
         WHERE c.boss_id = ?
         ORDER BY c.full_name
-    """, (boss_id,))
+    """
 
+    # PostgreSQL fix ya placeholders
+    if "psycopg2" in str(type(cur)).lower():
+        query = query.replace("?", "%s")
+
+    cur.execute(query, (boss_id,))
     customers = cur.fetchall()
+
     conn.close()
 
-    # Tuma data kwenye template
-    return render_template("boss_meters.html", customers=customers, boss={"full_name": session.get("boss_name", "Boss")})
-
+    return render_template(
+        "boss_meters.html",
+        customers=customers,
+        boss={"full_name": session.get("boss_name", "Boss")}
+    )
     
-import uuid
-
 @app.route("/boss_add_meter/<customer_id>", methods=["GET", "POST"])
 def boss_add_meter(customer_id):
     if "boss_id" not in session:
@@ -2161,11 +3119,16 @@ def boss_add_meter(customer_id):
         return redirect(url_for("boss_login"))
 
     boss_id = session["boss_id"]
-    conn = get_db_connection()
-    cur = conn.cursor()
+
+    # 🔌 Fungua database connection
+    conn, cur, db_type = get_db_connection()
 
     # Pata info ya mteja
-    cur.execute("SELECT * FROM customers WHERE customer_id=? AND boss_id=?", (customer_id, boss_id))
+    if db_type == "sqlite":
+        cur.execute("SELECT * FROM customers WHERE customer_id=? AND boss_id=?", (customer_id, boss_id))
+    else:
+        cur.execute("SELECT * FROM customers WHERE customer_id=%s AND boss_id=%s", (customer_id, boss_id))
+
     customer = cur.fetchone()
     if not customer:
         flash("Mteja haipo au sio wako.", "danger")
@@ -2178,22 +3141,39 @@ def boss_add_meter(customer_id):
             flash("Tafadhali andika namba ya meter", "danger")
         else:
             # Angalia kama meter tayari ipo
-            cur.execute("SELECT * FROM meters WHERE meter_number=?", (meter_number,))
+            if db_type == "sqlite":
+                cur.execute("SELECT * FROM meters WHERE meter_number=?", (meter_number,))
+            else:
+                cur.execute("SELECT * FROM meters WHERE meter_number=%s", (meter_number,))
+
             existing = cur.fetchone()
             if existing:
                 flash(f"Meter {meter_number} tayari ipo", "warning")
             else:
                 meter_id = "MTR-" + str(uuid.uuid4())[:8]
-                cur.execute("""
-                    INSERT INTO meters (meter_id, meter_number, customer_id, status)
-                    VALUES (?, ?, ?, ?)
-                """, (meter_id, meter_number, customer["customer_id"], "ACTIVE"))
+
+                if db_type == "sqlite":
+                    cur.execute("""
+                        INSERT INTO meters (meter_id, meter_number, customer_id, status)
+                        VALUES (?, ?, ?, ?)
+                    """, (meter_id, meter_number, customer["customer_id"], "ACTIVE"))
+                else:
+                    cur.execute("""
+                        INSERT INTO meters (meter_id, meter_number, customer_id, status)
+                        VALUES (%s, %s, %s, %s)
+                    """, (meter_id, meter_number, customer["customer_id"], "ACTIVE"))
+
                 conn.commit()
                 flash(f"✅ Meter {meter_number} imeongezwa kwa {customer['full_name']}", "success")
 
     # Pata meters zote za mteja
-    cur.execute("SELECT * FROM meters WHERE customer_id=?", (customer["customer_id"],))
+    if db_type == "sqlite":
+        cur.execute("SELECT * FROM meters WHERE customer_id=?", (customer["customer_id"],))
+    else:
+        cur.execute("SELECT * FROM meters WHERE customer_id=%s", (customer["customer_id"],))
+
     meters = cur.fetchall()
+
     conn.close()
 
     return render_template("boss_add_meter.html", customer=customer, meters=meters)
@@ -2212,8 +3192,7 @@ def boss_tariff():
     boss_id = session["boss_id"]
 
     # 🔌 Fungua database connection
-    conn = get_db_connection()
-    cur = conn.cursor()
+    conn, cur, db_type = get_db_connection()
 
     # ============================================================
     # 📥 POST REQUEST → CREATE / UPDATE TARIFF
@@ -2239,10 +3218,16 @@ def boss_tariff():
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             # 💾 Hifadhi tariff mpya kwenye database
-            cur.execute("""
-                INSERT INTO tariffs (tariff_id, boss_id, price_per_unit, created_at)
-                VALUES (?, ?, ?, ?)
-            """, (tariff_id, boss_id, price_per_unit, now))
+            if db_type == "sqlite":
+                cur.execute("""
+                    INSERT INTO tariffs (tariff_id, boss_id, price_per_unit, created_at)
+                    VALUES (?, ?, ?, ?)
+                """, (tariff_id, boss_id, price_per_unit, now))
+            else:
+                cur.execute("""
+                    INSERT INTO tariffs (tariff_id, boss_id, price_per_unit, created_at)
+                    VALUES (%s, %s, %s, %s)
+                """, (tariff_id, boss_id, price_per_unit, now))
 
             # ✅ Commit mabadiliko
             conn.commit()
@@ -2250,12 +3235,8 @@ def boss_tariff():
             # 📢 Feedback ya mafanikio
             flash(f"Bei imehifadhiwa: {price_per_unit} Tsh/unit", "success")
 
-        except ValueError:
-            # ❌ Error: input sio namba sahihi
-            flash("Bei ya unit lazima iwe namba sahihi", "danger")
-
-        except sqlite3.Error as e:
-            # ❌ Error ya database
+        except Exception as e:
+            # ❌ Error ya database au nyingine
             flash(f"Kosa la database: {e}", "danger")
 
         # 🔁 Redirect ili kuzuia form resubmission (PRG pattern)
@@ -2266,12 +3247,20 @@ def boss_tariff():
     # ============================================================
 
     # 🔍 Chukua tariff ya mwisho (latest) ya boss
-    cur.execute("""
-        SELECT * FROM tariffs 
-        WHERE boss_id=? 
-        ORDER BY created_at DESC 
-        LIMIT 1
-    """, (boss_id,))
+    if db_type == "sqlite":
+        cur.execute("""
+            SELECT * FROM tariffs 
+            WHERE boss_id=? 
+            ORDER BY created_at DESC 
+            LIMIT 1
+        """, (boss_id,))
+    else:
+        cur.execute("""
+            SELECT * FROM tariffs 
+            WHERE boss_id=%s 
+            ORDER BY created_at DESC 
+            LIMIT 1
+        """, (boss_id,))
 
     tariff = cur.fetchone()
 
@@ -2286,7 +3275,6 @@ def boss_tariff():
     
     
 # ================= UNREAD METERS =====================
-
 @app.route("/unread_meters", methods=["GET", "POST"])
 def unread_meters():
     # 1️⃣ Hakikisha boss au staff ana-login
@@ -2316,18 +3304,20 @@ def unread_meters():
     selected_month = request.form.get("month") or datetime.now().strftime("%Y-%m")
     current_month = datetime.now().strftime("%Y-%m")
 
-    conn = get_db_connection()
-    cur = conn.cursor()
+    # 🔌 Database connection (FIXED)
+    conn, cur, db_type = get_db_connection()
 
     # 4️⃣ Pata signup date ya boss
     cur.execute("SELECT signup_date FROM boss WHERE boss_id = ?", (boss_id,))
     boss_data = cur.fetchone()
+
     if not boss_data:
         conn.close()
         flash("Boss hakupatikana.", "danger")
         return redirect(url_for("staff_dashboard") if role == "staff" else url_for("boss_dashboard"))
 
     signup_month = boss_data["signup_date"][:7]
+
     if selected_month < signup_month:
         conn.close()
         return render_template(
@@ -2339,6 +3329,7 @@ def unread_meters():
             current_month=current_month,
             role=role
         )
+
     if selected_month > current_month:
         conn.close()
         return render_template(
@@ -2365,9 +3356,16 @@ def unread_meters():
     )
     ORDER BY c.full_name, m.created_at ASC
     """
-    cur.execute(query, (boss_id, selected_month))
+
+    if db_type == "sqlite":
+        cur.execute(query, (boss_id, selected_month))
+    else:
+        query_pg = query.replace("?", "%s")
+        cur.execute(query_pg, (boss_id, selected_month))
+
     unread = cur.fetchall()
     unread_count = len(unread)
+
     conn.close()
 
     return render_template(
@@ -2378,7 +3376,7 @@ def unread_meters():
         message=None,
         current_month=current_month,
         role=role
-    )    
+    )
    
 
 @app.route("/unpaid_bills")
@@ -2449,17 +3447,13 @@ def boss_view_customers():
     boss_id = session["boss_id"]
 
     # 🔌 Fungua database connection
-    conn = get_db_connection()
-    conn.row_factory = sqlite3.Row  # Inaruhusu kutumia columns kama dict (mf. row['full_name'])
+    conn, cur, db_type = get_db_connection()
 
     # ============================================================
     # 📊 FETCH CUSTOMERS + METERS (AGGREGATED VIEW)
     # ============================================================
-    # Lengo:
-    # - Kupata kila customer wa boss
-    # - Kuunganisha meters zote za customer mmoja kuwa row moja
-    # - Kutumia GROUP_CONCAT ili ku-display meters nyingi kwenye column moja
-    customers = conn.execute("""
+
+    query = """
         SELECT 
             c.customer_id, 
             c.full_name AS customer_name,
@@ -2468,27 +3462,25 @@ def boss_view_customers():
             c.house_number,
             c.status AS customer_status,
 
-            -- 🔢 Unganisha meter numbers zote za customer mmoja (comma separated)
             GROUP_CONCAT(m.meter_number) AS meters,
-
-            -- 📡 Unganisha status za meters (ACTIVE/INACTIVE n.k.)
             GROUP_CONCAT(m.status) AS meter_statuses
 
         FROM customers c
-
-        -- 🔗 Left join ili hata customer asiye na meter aonekane
         LEFT JOIN meters m 
             ON c.customer_id = m.customer_id
-
-        -- 🔒 Hakikisha tunaonyesha customers wa boss husika tu
         WHERE c.boss_id = ?
-
-        -- 📌 Group kwa customer ili kupata row moja kwa kila customer
         GROUP BY c.customer_id
-
-        -- 🔤 Panga kwa jina (A-Z)
         ORDER BY c.full_name
-    """, (boss_id,)).fetchall()
+    """
+
+    # SQLite vs PostgreSQL placeholder handling
+    if db_type == "sqlite":
+        cur.execute(query, (boss_id,))
+    else:
+        query = query.replace("?", "%s")
+        cur.execute(query, (boss_id,))
+
+    customers = cur.fetchall()
 
     # 🔒 Funga database connection
     conn.close()
@@ -2514,21 +3506,25 @@ def toggle_meter(meter_number):
     boss_id = session["boss_id"]
 
     # 🔌 Fungua database connection
-    conn = get_db_connection()
-    cur = conn.cursor()
+    conn, cur, db_type = get_db_connection()
 
     # ============================================================
     # 🔍 VERIFY METER BELONGS TO BOSS
     # ============================================================
-    # Lengo:
-    # 1️⃣ Hakikisha meter ipo kwenye database
-    # 2️⃣ Hakikisha meter inahusiana na mteja wa boss huyu
-    cur.execute("""
-        SELECT m.status 
-        FROM meters m
-        JOIN customers c ON m.customer_id = c.customer_id
-        WHERE m.meter_number = ? AND c.boss_id = ?
-    """, (meter_number, boss_id))
+    if db_type == "sqlite":
+        cur.execute("""
+            SELECT m.status 
+            FROM meters m
+            JOIN customers c ON m.customer_id = c.customer_id
+            WHERE m.meter_number = ? AND c.boss_id = ?
+        """, (meter_number, boss_id))
+    else:
+        cur.execute("""
+            SELECT m.status 
+            FROM meters m
+            JOIN customers c ON m.customer_id = c.customer_id
+            WHERE m.meter_number = %s AND c.boss_id = %s
+        """, (meter_number, boss_id))
 
     meter = cur.fetchone()
 
@@ -2541,17 +3537,21 @@ def toggle_meter(meter_number):
     # ============================================================
     # 🔄 TOGGLE METER STATUS
     # ============================================================
-    # Logic:
-    # - Kama status ni ACTIVE → set kuwa INACTIVE
-    # - Kama status ni INACTIVE → set kuwa ACTIVE
     new_status = "INACTIVE" if meter["status"] == "ACTIVE" else "ACTIVE"
 
     # 💾 Update database
-    cur.execute("""
-        UPDATE meters
-        SET status = ?
-        WHERE meter_number = ?
-    """, (new_status, meter_number))
+    if db_type == "sqlite":
+        cur.execute("""
+            UPDATE meters
+            SET status = ?
+            WHERE meter_number = ?
+        """, (new_status, meter_number))
+    else:
+        cur.execute("""
+            UPDATE meters
+            SET status = %s
+            WHERE meter_number = %s
+        """, (new_status, meter_number))
 
     # ✅ Commit mabadiliko
     conn.commit()
@@ -2564,7 +3564,6 @@ def toggle_meter(meter_number):
 
     # 🔁 Rudisha boss kwenye customers view
     return redirect(url_for("boss_view_customers"))
-
 
 
     
@@ -2583,20 +3582,23 @@ def toggle_customer(customer_id):
     boss_id = session["boss_id"]
 
     # 🔌 Fungua connection ya database
-    conn = get_db_connection()
-    cur = conn.cursor()
+    conn, cur, db_type = get_db_connection()
 
     # ============================================================
     # 2️⃣ VERIFY CUSTOMER BELONGS TO THIS BOSS
     # ============================================================
-    # Lengo:
-    # - Hakikisha customer ipo kwenye database
-    # - Hakikisha customer anahusiana na boss huyu
-    cur.execute("""
-        SELECT status 
-        FROM customers
-        WHERE customer_id = ? AND boss_id = ?
-    """, (customer_id, boss_id))
+    if db_type == "sqlite":
+        cur.execute("""
+            SELECT status 
+            FROM customers
+            WHERE customer_id = ? AND boss_id = ?
+        """, (customer_id, boss_id))
+    else:
+        cur.execute("""
+            SELECT status 
+            FROM customers
+            WHERE customer_id = %s AND boss_id = %s
+        """, (customer_id, boss_id))
 
     customer = cur.fetchone()
 
@@ -2618,11 +3620,18 @@ def toggle_customer(customer_id):
         new_status = "ACTIVE"
 
     # 💾 Update database
-    cur.execute("""
-        UPDATE customers
-        SET status = ?
-        WHERE customer_id = ?
-    """, (new_status, customer_id))
+    if db_type == "sqlite":
+        cur.execute("""
+            UPDATE customers
+            SET status = ?
+            WHERE customer_id = ?
+        """, (new_status, customer_id))
+    else:
+        cur.execute("""
+            UPDATE customers
+            SET status = %s
+            WHERE customer_id = %s
+        """, (new_status, customer_id))
 
     # ✅ Commit changes
     conn.commit()
@@ -2841,16 +3850,22 @@ def add_staff():
         status = "ACTIVE"
 
         # 🔌 Fungua database connection
-        conn = get_db_connection()
-        cur = conn.cursor()
+        conn, cur, db_type = get_db_connection()
 
         try:
             # 💾 Insert staff mpya kwenye database
-            cur.execute("""
-                INSERT INTO staff (
-                    staff_id, boss_id, full_name, username, password, role, status, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (staff_id, boss_id, full_name, username, hashed_pw, role, status, now))
+            if db_type == "sqlite":
+                cur.execute("""
+                    INSERT INTO staff (
+                        staff_id, boss_id, full_name, username, password, role, status, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (staff_id, boss_id, full_name, username, hashed_pw, role, status, now))
+            else:
+                cur.execute("""
+                    INSERT INTO staff (
+                        staff_id, boss_id, full_name, username, password, role, status, created_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """, (staff_id, boss_id, full_name, username, hashed_pw, role, status, now))
 
             # ✅ Commit changes
             conn.commit()
@@ -2858,9 +3873,9 @@ def add_staff():
             # 📢 Feedback ya mafanikio kwa boss
             flash(f"Staff {full_name} ameundwa kikamilifu na role '{role}'", "success")
 
-        except sqlite3.IntegrityError:
-            # ❌ Error: username tayari ipo kwenye system
-            flash("Username tayari ipo kwenye mfumo.", "danger")
+        except Exception as e:
+            # ❌ Error yoyote ya database
+            flash(f"Kosa limetokea: {e}", "danger")
 
         finally:
             # 🔒 Funga connection kila hali
@@ -2872,7 +3887,7 @@ def add_staff():
     # ============================================================
     # 3️⃣ HANDLE GET REQUEST → DISPLAY FORM
     # ============================================================
-    return render_template("add_staff.html")              
+    return render_template("add_staff.html")
                       
 
                           
@@ -2883,7 +3898,6 @@ def add_staff():
 # 🔹 Method: GET (ina-display data tu)
 # 🔹 Template: view_staff.html
 # ============================================================
-
 @app.route("/boss/view_staff")
 def view_staff():
 
@@ -2901,11 +3915,14 @@ def view_staff():
     # ============================================================
     # 2️⃣ DATABASE QUERY → Pata list ya staff
     # ============================================================
-    conn = get_db_connection()
-    cur = conn.cursor()
+    conn, cur, db_type = get_db_connection()
 
     # 🔍 Chukua staff wote waliopo kwa boss huyu
-    cur.execute("SELECT * FROM staff WHERE boss_id=?", (boss_id,))
+    if db_type == "sqlite":
+        cur.execute("SELECT * FROM staff WHERE boss_id=?", (boss_id,))
+    else:
+        cur.execute("SELECT * FROM staff WHERE boss_id=%s", (boss_id,))
+
     staff_list = cur.fetchall()
 
     # 🔒 Funga connection ya database
@@ -2987,11 +4004,14 @@ def toggle_staff(staff_id):
         flash("Tafadhali ingia kwanza", "danger")
         return redirect(url_for("boss_login"))
 
-    conn = get_db_connection()
-    cur = conn.cursor()
+    conn, cur, db_type = get_db_connection()
 
     # Pata current status
-    cur.execute("SELECT status FROM staff WHERE staff_id=?", (staff_id,))
+    if db_type == "sqlite":
+        cur.execute("SELECT status FROM staff WHERE staff_id=?", (staff_id,))
+    else:
+        cur.execute("SELECT status FROM staff WHERE staff_id=%s", (staff_id,))
+
     staff = cur.fetchone()
     if not staff:
         flash("Staff haipo", "danger")
@@ -3000,12 +4020,17 @@ def toggle_staff(staff_id):
 
     # Badilisha status
     new_status = "INACTIVE" if staff["status"] == "ACTIVE" else "ACTIVE"
-    cur.execute("UPDATE staff SET status=? WHERE staff_id=?", (new_status, staff_id))
+
+    if db_type == "sqlite":
+        cur.execute("UPDATE staff SET status=? WHERE staff_id=?", (new_status, staff_id))
+    else:
+        cur.execute("UPDATE staff SET status=%s WHERE staff_id=%s", (new_status, staff_id))
+
     conn.commit()
     conn.close()
 
     flash(f"Staff status imebadilishwa kuwa {new_status}", "success")
-    return redirect(url_for("view_staff")) 
+    return redirect(url_for("view_staff"))
     
 # ================= STAFF LOGIN =====================
 from flask import session, redirect, url_for, flash, render_template, request
@@ -3235,13 +4260,12 @@ def boss_monthly_report():
     # ----------------------------------------
     # Database connection
     # ----------------------------------------
-    conn = get_db_connection()
-    cur = conn.cursor()
+    conn, cur, db_type = get_db_connection()
 
     # ----------------------------------------
     # Fetch monthly bills (join customers)
     # ----------------------------------------
-    cur.execute("""
+    query = """
         SELECT 
             b.bill_id,
             b.customer_id,
@@ -3255,10 +4279,16 @@ def boss_monthly_report():
             b.payment_date
         FROM bills b
         JOIN customers c ON b.customer_id = c.customer_id
-        WHERE c.boss_id = ? 
+        WHERE c.boss_id = ?
           AND b.billing_month = ?
         ORDER BY b.bill_id DESC
-    """, (boss_id, month))
+    """
+
+    if db_type == "sqlite":
+        cur.execute(query, (boss_id, month))
+    else:
+        query = query.replace("?", "%s")
+        cur.execute(query, (boss_id, month))
 
     bills = cur.fetchall()
 
